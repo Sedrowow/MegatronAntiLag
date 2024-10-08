@@ -282,20 +282,44 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     end
 
     -- Retrieve vehicle data for author and name
-    -- vehicle_data already retrieved earlier
     local vehicle_name = vehicle_data["name"] or "no name"
-    local vehicle_authors = vehicle_data["authors"] or "self"
+    local vehicle_authors = vehicle_data["authors"] or {}
 
     local is_ws_vehicle = false
     local player_name = server.getPlayerName(peer_id)
 
-    if vehicle_authors ~= "self" then
+    local player_is_author = false
+
+    if #vehicle_authors > 0 then
         -- Vehicle has authors (from workshop)
         is_ws_vehicle = true
         -- Check if the player's name is among the authors
-        if string.find(vehicle_authors, player_name) then
-            -- Player is among the authors
+        for _, author_info in ipairs(vehicle_authors) do
+            -- Each author_info is likely a table; extract the name
+            local author_name = author_info.name or "Unknown"
+            if author_name == player_name then
+                -- Player is among the authors
+                player_is_author = true
+                break
+            end
+        end
+        if player_is_author then
             is_ws_vehicle = false
+        end
+    else
+        -- No authors, vehicle is self-made
+        is_ws_vehicle = false
+        vehicle_authors = { { name = "self" } }
+    end
+
+    -- Manually construct a string of author names
+    local authors_str = ""
+    for i, author_info in ipairs(vehicle_authors) do
+        local author_name = author_info.name or "Unknown"
+        if i == 1 then
+            authors_str = author_name
+        else
+            authors_str = authors_str .. ", " .. author_name
         end
     end
 
@@ -322,7 +346,7 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     local message = "Vehicle Spawned:\n"
     message = message .. "Player: " .. player_name .. "\n"
     message = message .. "Vehicle Name: " .. vehicle_name .. "\n"
-    message = message .. "Authors: " .. vehicle_authors .. "\n"
+    message = message .. "Authors: " .. authors_str .. "\n"
     message = message .. "Group ID: " .. group_id .. "\n"
     message = message .. "Lag Cost: " .. total_lag_cost
 
@@ -505,7 +529,270 @@ function onVehicleDespawn(vehicle_id, peer_id)
     end
 end
 
--- (Rest of your existing functions remain unchanged)
+
+-- Function to calculate and update TPS
+function updateTPS(game_ticks)
+    local tempo = server.getTimeMillisec()
+
+    if tempo - TIME < 1996 then
+        TICKS = TICKS + (game_ticks * 0.49875)
+    else
+        -- TICKS remains the same
+    end
+
+    if tempo - TIME >= 1996 then
+        TPS = TICKS
+        TIME = tempo
+        TICKS = 0
+    end
+
+    -- Optionally, display TPS
+    server.setPopupScreen(-1, 3, "TPS", true, "TPS: " .. tostring(TPS), 0.9, 0.8)
+
+    -- Check if TPS is below threshold
+    if TPS < TPS_THRESHOLD then
+        if not tps_countdown then
+            tps_countdown = 8  -- Start 8 seconds countdown
+            tps_warning_issued = false
+            tps_countdown_start_time = tempo
+
+            if debug_mode then
+                server.announce("[DEBUG]", "TPS dropped below threshold. Starting countdown.", -1)
+            end
+        end
+    else
+        if tps_countdown then
+            -- Remove the TPS countdown popup if TPS recovers
+            server.removePopup(-1, 1)
+            if debug_mode then
+                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.", -1)
+            end
+        end
+        tps_countdown = nil
+        tps_warning_issued = false
+    end
+
+    -- Emergency cleanup check
+    if TPS < emergency_cleanup_tps then
+        if not emergency_cleanup_countdown then
+            emergency_cleanup_countdown = 2500  -- milliseconds
+            emergency_cleanup_start_time = tempo
+            -- Display the emergency cleanup popup
+            local message = "Emergency cleanup in 2 seconds due to very low TPS."
+            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Emergency cleanup initiated.", -1)
+            end
+        end
+    else
+        if emergency_cleanup_countdown then
+            -- Remove the emergency cleanup popup if TPS recovers
+            server.removePopup(-1, 2)
+        end
+        emergency_cleanup_countdown = nil
+    end
+end
+
+
+-- Function to handle TPS countdown and vehicle despawning
+function handleTPSCountdown()
+    if tps_countdown then
+        local tempo = server.getTimeMillisec()
+        local elapsed_time = (tempo - tps_countdown_start_time) / 1000  -- Convert to seconds
+        local remaining_time = math.ceil(tps_countdown - elapsed_time)
+
+        if remaining_time > 0 then
+            -- Update the popup screen with the remaining time
+            local message = "Server TPS is low!\nRemoving high-lag vehicles in " .. remaining_time .. " seconds."
+            server.setPopupScreen(-1, 1, "[MAL] Low TPS Warning", true, message, 0.5, 0.4)  -- Position slightly above center
+        else
+            -- Countdown has finished
+            -- Remove the popup screen
+            server.removePopup(-1, 1)
+            -- Despawn the vehicle with the highest lag cost
+            despawnHighestLagVehicle()
+            tps_countdown = nil
+            tps_warning_issued = false
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.", -1)
+            end
+        end
+    end
+end
+
+
+
+-- Function to handle emergency cleanup countdown
+function handleEmergencyCleanup()
+    if emergency_cleanup_countdown then
+        local current_time = server.getTimeMillisec()
+        local elapsed_time = current_time - emergency_cleanup_start_time
+        local remaining_time = math.ceil((emergency_cleanup_countdown - elapsed_time) / 1000)
+
+        if remaining_time > 0 then
+            -- Update the popup screen with the remaining time
+            local message = "Emergency cleanup in " .. remaining_time .. " seconds due to very low TPS."
+            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.", -1)
+            end
+        else
+            -- Countdown has finished
+            -- Remove the popup screen
+            server.removePopup(-1, 2)
+            -- Time to perform emergency cleanup
+            server.cleanVehicles()
+            server.notify(-1, "[MAL]", "Emergency cleanup executed due to very low TPS.", 1)
+            if debug_mode then
+                server.announce("[DEBUG]", "Emergency cleanup executed.", -1)
+            end
+            emergency_cleanup_countdown = nil
+        end
+    end
+end
+
+
+
+-- Initialize last_despawn_time at the top of your script
+local last_despawn_time = 0  -- Time in milliseconds
+
+-- Function to despawn the vehicle with the highest lag cost
+function despawnHighestLagVehicle()
+    local current_time = server.getTimeMillisec()
+    -- Check if at least 2000 milliseconds have passed since the last despawn
+    if current_time - last_despawn_time < 2000 then
+        -- Not enough time has passed; skip despawning
+        if debug_mode then
+            server.announce("[DEBUG]", "Despawn cooldown active. Skipping despawn.", -1)
+        end
+        return
+    end
+
+    -- Update the last despawn time
+    last_despawn_time = current_time
+
+    local highest_lag_cost = 0
+    local vehicle_to_despawn = nil
+
+    for vehicle_id, info in pairs(vehicle_lag_costs) do
+        if info.lag_cost > highest_lag_cost then
+            highest_lag_cost = info.lag_cost
+            vehicle_to_despawn = vehicle_id
+        end
+    end
+
+    if vehicle_to_despawn then
+        local group_id = vehicle_lag_costs[vehicle_to_despawn].group_id
+        despawnVehicleGroup(group_id)
+        -- Notify the owner
+        local peer_id = vehicle_lag_costs[vehicle_to_despawn].peer_id
+        server.notify(peer_id, "[MAL]", "Your vehicle has been despawned due to high server load.", 2)  -- Notification type 2: failed_mission
+
+        if debug_mode then
+            server.announce("[DEBUG]", "Despawning vehicle with highest lag cost: Vehicle ID=" .. vehicle_to_despawn, -1)
+        end
+    else
+        if debug_mode then
+            server.announce("[DEBUG]", "No vehicles to despawn.", -1)
+        end
+    end
+end
+
+
+-- Function to show player's lag cost
+function showPlayerLagCost(target_peer_id, requesting_peer_id)
+    local lag_cost = player_lag_costs[target_peer_id] or 0
+    local lag_cost_limit = PLAYER_LAG_COST_LIMIT
+    local lag_cost_left = lag_cost_limit - lag_cost
+
+    local message = "Lag Cost for Player " .. target_peer_id .. ":\nTotal Lag Cost: " .. lag_cost .. "\nLag Cost Left: " .. lag_cost_left
+
+    -- List groups and their lag costs
+    local groups = player_vehicle_groups[target_peer_id]
+    if groups then
+        message = message .. "\nVehicle Groups:"
+        for group_id, vehicles in pairs(groups) do
+            local group_lag_cost = 0
+            for _, vehicle_id in ipairs(vehicles) do
+                local vehicle_info = vehicle_lag_costs[vehicle_id]
+                if vehicle_info then
+                    group_lag_cost = group_lag_cost + vehicle_info.lag_cost
+                end
+            end
+            message = message .. "\nGroup ID: " .. group_id .. " - Lag Cost: " .. group_lag_cost
+        end
+    else
+        message = message .. "\nNo vehicle groups."
+    end
+
+    server.announce("[MAL]", message, requesting_peer_id)
+end
+
+-- Function to clear laggy vehicles
+function clearLag(lag_threshold)
+    local group_lag_costs = {}  -- [group_id] = total_lag_cost
+    for vehicle_id, info in pairs(vehicle_lag_costs) do
+        local group_id = info.group_id
+        group_lag_costs[group_id] = (group_lag_costs[group_id] or 0) + info.lag_cost
+    end
+
+    for group_id, total_lag_cost in pairs(group_lag_costs) do
+        if total_lag_cost > lag_threshold then
+            despawnVehicleGroup(group_id)
+            local peer_id = group_peer_mapping[group_id]
+            server.notify(peer_id, "[MAL]", "Your vehicle has been despawned due to exceeding lag cost threshold.", 2)
+            if debug_mode then
+                server.announce("[DEBUG]", "Despawning vehicle group " .. group_id .. " due to total lag cost " .. total_lag_cost .. " exceeding threshold " .. lag_threshold)
+            end
+        end
+    end
+end
+
+-- Function to repair a specific group
+function repairGroup(peer_id, group_id, is_admin)
+    local owner_peer_id = group_peer_mapping[group_id]
+    if owner_peer_id == peer_id or is_admin then
+        local vehicle_ids, is_success = server.getVehicleGroup(group_id)
+        if is_success then
+            for _, vehicle_id in ipairs(vehicle_ids) do
+                server.resetVehicleState(vehicle_id)
+            end
+            server.notify(peer_id, "[MAL]", "Repaired vehicles in group " .. group_id .. ".", 4)  -- Notification type 4: complete_mission
+            if debug_mode then
+                server.announce("[DEBUG]", "Player " .. peer_id .. " repaired group " .. group_id)
+            end
+        else
+            server.notify(peer_id, "[MAL]", "Failed to repair vehicles. Group not found.", 2)
+        end
+    else
+        server.notify(peer_id, "[MAL]", "You do not have permission to repair this vehicle group.", 2)
+    end
+end
+
+-- Function to repair all vehicles of a player
+function repairPlayerVehicles(peer_id)
+    local groups = player_vehicle_groups[peer_id]
+    if groups then
+        for group_id, vehicles in pairs(groups) do
+            local vehicle_ids, is_success = server.getVehicleGroup(group_id)
+            if is_success then
+                for _, vehicle_id in ipairs(vehicle_ids) do
+                    server.resetVehicleState(vehicle_id)
+                end
+            end
+        end
+        server.notify(peer_id, "[MAL]", "Repaired all your vehicles.", 4)
+        if debug_mode then
+            server.announce("[DEBUG]", "Player " .. peer_id .. " repaired all their vehicles.")
+        end
+    else
+        server.notify(peer_id, "[MAL]", "You have no vehicles to repair.", 2)
+    end
+end
+
 
 -- Function to handle custom chat commands
 function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
