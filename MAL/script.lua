@@ -36,6 +36,11 @@ local emergency_cleanup_start_time = nil
 -- Debug Mode Variable
 local debug_mode = false  -- Debug mode is off by default
 
+-- Reload Countdown Variables
+reload_countdown_active = false
+reload_countdown_time = 0
+reload_countdown_start_time = 0
+
 -- Tables to store tracking data
 local vehicle_lag_costs = {}         -- [vehicle_id] = {lag_cost = number, peer_id = number, group_id = number}
 local player_vehicle_groups = {}     -- [peer_id] = {group_id = {vehicle_ids}}
@@ -43,6 +48,64 @@ local group_peer_mapping = {}        -- [group_id] = peer_id
 local player_lag_costs = {}          -- [peer_id] = total_lag_cost
 local vehicle_loading = {}           -- [vehicle_id] = {peer_id, group_id}
 local group_tps_impact = {}          -- [group_id] = {pre_tps = number, check_time = number}
+
+function onCreate(is_world_create)
+    if not is_world_create then
+        -- This is a script reload, not a world creation
+        -- Start the reload countdown
+        reload_countdown_active = true
+        reload_countdown_time = 5  -- Countdown time in seconds
+        reload_countdown_start_time = server.getTimeMillisec()
+
+        -- Display a popup screen in the center for all players
+        local message = "Server scripts have been reloaded. Resuming operations in " .. reload_countdown_time .. " seconds."
+        server.setPopupScreen(-1, 0, "[MAL] Script Reloaded", true, message, 0.5, 0.5)  -- Position (0.5, 0.5) centers the popup
+
+        if debug_mode then
+            server.announce("[DEBUG]", "Scripts have been reloaded via onCreate. Starting countdown.", -1)
+        end
+    end
+end
+
+-- Function to handle the reload countdown
+function handleReloadCountdown()
+    if reload_countdown_active then
+        local current_time = server.getTimeMillisec()
+        local elapsed_time = (current_time - reload_countdown_start_time) / 1000  -- Convert to seconds
+        local remaining_time = math.ceil(reload_countdown_time - elapsed_time)
+
+        if remaining_time > 0 then
+            -- Update the popup screen with the remaining time
+            local message = "Server scripts have been reloaded. Resuming operations after cleanup in " .. remaining_time .. " seconds."
+            server.setPopupScreen(-1, 0, "[MAL] Script Reloaded", true, message, 0.5, 0.5)
+        else
+            -- Countdown has finished
+            reload_countdown_active = false
+            -- Remove the popup screen
+            server.removePopup(-1, 0)
+                -- Initialize or reset variables and tables
+            TIME = server.getTimeMillisec()
+            TICKS = 0
+            TPS = 0    
+            tps_countdown = nil
+            tps_warning_issued = false
+            emergency_cleanup_countdown = nil
+            emergency_cleanup_start_time = nil
+        
+            -- Reset tracking tables
+            vehicle_lag_costs = {}
+            vehicle_loading = {}
+            group_tps_impact = {}
+            group_peer_mapping = {}
+            player_vehicle_groups = {}
+            player_lag_costs = {}
+            if debug_mode then
+                server.announce("[DEBUG]", "Reload countdown completed and cleanup commenced. Resuming normal operations.", -1)
+            end
+        end
+    end
+end
+
 
 -- Function to handle vehicle spawning
 function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
@@ -534,19 +597,33 @@ end
 
 -- onTick function
 function onTick(game_ticks)
-    -- Update TPS
-    updateTPS(game_ticks)
+    -- Handle reload countdown
+    handleReloadCountdown()
 
-    -- Handle TPS countdown
-    handleTPSCountdown()
+    -- Only proceed with normal operations if the reload countdown is not active
+    if not reload_countdown_active then
+        -- Update TPS
+        updateTPS(game_ticks)
 
-    -- Update vehicle loading status
-    updateVehicleLoading()
+        -- Handle TPS countdown
+        handleTPSCountdown()
 
-    -- Update TPS impact checks
-    updateGroupTPSImpact()
+        -- Handle emergency cleanup
+        handleEmergencyCleanup()
 
-    -- Other game logic...
+        -- Update vehicle loading status
+        updateVehicleLoading()
+
+        -- Update TPS impact checks
+        updateGroupTPSImpact()
+
+        -- Other game logic...
+    else
+        -- Optionally, you can pause other operations or provide feedback during the countdown
+        if debug_mode then
+            server.announce("[DEBUG]", "Reload countdown active. Pausing normal operations.", -1)
+        end
+    end
 end
 
 -- Function to handle custom chat commands
