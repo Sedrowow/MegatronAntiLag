@@ -222,7 +222,6 @@ function updateGroupTPSImpact()
 end
 
 -- Function to calculate the lag cost for a single vehicle
--- Function to calculate the lag cost for a single vehicle
 function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     -- Before calculating lag cost, check if the vehicle still exists
     local vehicle_data, is_success = server.getVehicleData(vehicle_id)
@@ -232,48 +231,56 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
         end
         return
     end
-    if is_success then
-        local total_lag_cost = 0
 
-
-        -- Include voxel count in lag cost
-        local voxel_count = vehicle_components["voxels"] or 0
-        local voxel_lag_cost = voxel_count * VOXEL_LAG_COST
-        total_lag_cost = total_lag_cost + voxel_lag_cost
-
-        -- Loop through each component type and calculate lag cost
-        for component_type, components in pairs(vehicle_components["components"]) do
-            if COMPONENT_LAG_COSTS[component_type] then
-                local component_count = #components
-                total_lag_cost = total_lag_cost + (COMPONENT_LAG_COSTS[component_type] * component_count)
-            end
-        end
-
-        -- Store the vehicle's lag cost along with peer_id and group_id
-        vehicle_lag_costs[vehicle_id] = {
-            lag_cost = total_lag_cost,
-            peer_id = peer_id,
-            group_id = group_id
-        }
-
-        -- Update the player's total lag cost
-        if not player_lag_costs[peer_id] then
-            player_lag_costs[peer_id] = 0
-        end
-        player_lag_costs[peer_id] = player_lag_costs[peer_id] + total_lag_cost
-
+    -- Retrieve vehicle components
+    local vehicle_components, is_success = server.getVehicleComponents(vehicle_id)
+    if not is_success then
         if debug_mode then
-            server.announce("[DEBUG]", "Calculated lag cost for vehicle " .. vehicle_id .. ": " .. total_lag_cost)
-            server.announce("[DEBUG]", "Total lag cost for player " .. peer_id .. ": " .. player_lag_costs[peer_id])
+            server.announce("[DEBUG]", "Failed to get components for vehicle " .. vehicle_id .. ". Skipping lag cost calculation.", -1)
         end
+        return
+    end
 
-        -- Check if the player's lag cost exceeds the limit
-        if player_lag_costs[peer_id] > PLAYER_LAG_COST_LIMIT then
-            -- Despawn the player's vehicles
-            despawnPlayerVehicles(peer_id)
+    local total_lag_cost = 0  -- Initialize total lag cost
+
+    -- Include voxel count in lag cost
+    local voxel_count = vehicle_components["voxels"] or 0
+    local voxel_lag_cost = voxel_count * VOXEL_LAG_COST
+    total_lag_cost = total_lag_cost + voxel_lag_cost
+
+    -- Loop through each component type and calculate lag cost
+    for component_type, components in pairs(vehicle_components["components"]) do
+        if COMPONENT_LAG_COSTS[component_type] then
+            local component_count = #components
+            total_lag_cost = total_lag_cost + (COMPONENT_LAG_COSTS[component_type] * component_count)
         end
     end
+
+    -- Store the vehicle's lag cost along with peer_id and group_id
+    vehicle_lag_costs[vehicle_id] = {
+        lag_cost = total_lag_cost,
+        peer_id = peer_id,
+        group_id = group_id
+    }
+
+    -- Update the player's total lag cost
+    if not player_lag_costs[peer_id] then
+        player_lag_costs[peer_id] = 0
+    end
+    player_lag_costs[peer_id] = player_lag_costs[peer_id] + total_lag_cost
+
+    if debug_mode then
+        server.announce("[DEBUG]", "Calculated lag cost for vehicle " .. vehicle_id .. ": " .. total_lag_cost, -1)
+        server.announce("[DEBUG]", "Total lag cost for player " .. peer_id .. ": " .. player_lag_costs[peer_id], -1)
+    end
+
+    -- Check if the player's lag cost exceeds the limit
+    if player_lag_costs[peer_id] > PLAYER_LAG_COST_LIMIT then
+        -- Despawn the player's vehicles
+        despawnPlayerVehicles(peer_id)
+    end
 end
+
 
 -- Function to despawn all vehicles belonging to a player
 function despawnPlayerVehicles(peer_id)
