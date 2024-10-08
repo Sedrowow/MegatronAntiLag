@@ -1,5 +1,5 @@
 -- Define the maximum allowable lag cost per player
-local PLAYER_LAG_COST_LIMIT = 5000  -- Adjust this value as needed
+local PLAYER_LAG_COST_LIMIT = 8000  -- Adjust this value as needed
 local PLAYER_LAG_COST_LIMIT_WS = PLAYER_LAG_COST_LIMIT / 2  -- Lag cost limit for workshop vehicles not authored by the player
 
 -- Component lag costs for each type
@@ -738,19 +738,21 @@ function despawnHighestLagVehicle()
 
     local highest_lag_cost = 0
     local vehicle_to_despawn = nil
+    local vehicle_info_to_despawn = nil  -- Store the info along with the vehicle_id
 
     for vehicle_id, info in pairs(vehicle_lag_costs) do
-        if info.lag_cost > highest_lag_cost then
+        if info and info.lag_cost > highest_lag_cost then
             highest_lag_cost = info.lag_cost
             vehicle_to_despawn = vehicle_id
+            vehicle_info_to_despawn = info  -- Store the info here
         end
     end
 
-    if vehicle_to_despawn then
-        local group_id = vehicle_lag_costs[vehicle_to_despawn].group_id
+    if vehicle_to_despawn and vehicle_info_to_despawn then
+        local group_id = vehicle_info_to_despawn.group_id
         despawnVehicleGroup(group_id)
         -- Notify the owner
-        local peer_id = vehicle_lag_costs[vehicle_to_despawn].peer_id
+        local peer_id = vehicle_info_to_despawn.peer_id
         server.notify(peer_id, "[MAL]", "Your vehicle has been despawned due to high server load.", 2)  -- Notification type 2: failed_mission
 
         if debug_mode then
@@ -762,6 +764,7 @@ function despawnHighestLagVehicle()
         end
     end
 end
+
 
 
 -- Function to show player's lag cost
