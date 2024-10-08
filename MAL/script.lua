@@ -137,6 +137,7 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
 end
 
 -- Function to check vehicle loading and calculate lag cost when ready
+-- Function to check vehicle loading and calculate lag cost when ready
 function updateVehicleLoading()
     for vehicle_id, info in pairs(vehicle_loading) do
         local vehicle_data, is_success = server.getVehicleData(vehicle_id)
@@ -154,6 +155,9 @@ function updateVehicleLoading()
 
                 -- Check if all vehicles in the group are simulating
                 if areAllGroupVehiclesSimulating(info.group_id) then
+                    -- Announce the group spawn
+                    announceGroupSpawn(info.group_id, info.peer_id)
+
                     -- Measure TPS impact
                     measureGroupTPSImpact(info.group_id)
                 end
@@ -167,6 +171,7 @@ function updateVehicleLoading()
         end
     end
 end
+
 
 -- Function to check if all vehicles in a group are simulating
 function areAllGroupVehiclesSimulating(group_id)
@@ -204,6 +209,92 @@ function areAllGroupVehiclesSimulating(group_id)
         server.announce("[DEBUG]", "All vehicles in group " .. group_id .. " are now simulating.", -1)
     end
     return true
+end
+
+-- Function to announce the group spawn
+function announceGroupSpawn(group_id, peer_id)
+    local vehicles = player_vehicle_groups[peer_id][group_id]
+    if not vehicles then
+        if debug_mode then
+            server.announce("[DEBUG]", "No vehicles found for group " .. group_id .. " for announcement.", -1)
+        end
+        return
+    end
+
+    local player_name = server.getPlayerName(peer_id)
+    local total_lag_cost = 0
+    local vehicle_names_set = {}
+    local vehicle_authors_set = {}
+    local is_ws_vehicle = false
+
+    for _, vehicle_id in ipairs(vehicles) do
+        local vehicle_info = vehicle_lag_costs[vehicle_id]
+        if vehicle_info then
+            total_lag_cost = total_lag_cost + vehicle_info.lag_cost
+            if vehicle_info.is_ws then
+                is_ws_vehicle = true
+            end
+
+            -- Collect vehicle names
+            local vehicle_name = vehicle_info.vehicle_name or "no name"
+            vehicle_names_set[vehicle_name] = true
+
+            -- Collect authors
+            for _, author_info in ipairs(vehicle_info.vehicle_authors) do
+                local author_name = author_info.name or "Unknown"
+                vehicle_authors_set[author_name] = true
+            end
+        else
+            if debug_mode then
+                server.announce("[DEBUG]", "Vehicle info not found for vehicle " .. vehicle_id .. " in group " .. group_id, -1)
+            end
+        end
+    end
+
+    -- Convert vehicle names set to a comma-separated string
+    local vehicle_names_str = ""
+    for name, _ in pairs(vehicle_names_set) do
+        if vehicle_names_str == "" then
+            vehicle_names_str = name
+        else
+            vehicle_names_str = vehicle_names_str .. ", " .. name
+        end
+    end
+
+    -- Convert authors set to a comma-separated string
+    local authors_str = ""
+    if next(vehicle_authors_set) == nil then
+        authors_str = "self"
+    else
+        local authors = {}
+        for author_name, _ in pairs(vehicle_authors_set) do
+            table.insert(authors, author_name)
+        end
+        authors_str = table.concat(authors, ", ")
+    end
+
+    -- Announce vehicle group spawn information
+    local message = "Vehicle Group Spawned:\n"
+    message = message .. "Player: " .. player_name .. "\n"
+    message = message .. "Vehicle Names: " .. vehicle_names_str .. "\n"
+    message = message .. "Authors: " .. authors_str .. "\n"
+    message = message .. "Group ID: " .. group_id .. "\n"
+    message = message .. "Total Lag Cost: " .. total_lag_cost
+
+    server.announce("[MAL]", message, peer_id)
+
+    -- Determine lag cost limit based on whether it's a workshop vehicle
+    local lag_cost_limit = PLAYER_LAG_COST_LIMIT
+    if is_ws_vehicle then
+        lag_cost_limit = PLAYER_LAG_COST_LIMIT_WS
+    end
+
+    -- Check if the player's lag cost exceeds the limit
+    if player_lag_costs[peer_id] > lag_cost_limit then
+        -- Despawn the player's vehicles
+        despawnPlayerVehicles(peer_id)
+        server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
+    end
 end
 
 -- Function to measure the TPS impact of a vehicle group
@@ -246,6 +337,7 @@ function updateGroupTPSImpact()
     end
 end
 
+-- Function to calculate the lag cost for a single vehicle
 -- Function to calculate the lag cost for a single vehicle
 function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     -- Before calculating lag cost, check if the vehicle still exists
@@ -295,7 +387,6 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
         is_ws_vehicle = true
         -- Check if the player's name is among the authors
         for _, author_info in ipairs(vehicle_authors) do
-            -- Each author_info is likely a table; extract the name
             local author_name = author_info.name or "Unknown"
             if author_name == player_name then
                 -- Player is among the authors
@@ -312,23 +403,14 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
         vehicle_authors = { { name = "self" } }
     end
 
-    -- Manually construct a string of author names
-    local authors_str = ""
-    for i, author_info in ipairs(vehicle_authors) do
-        local author_name = author_info.name or "Unknown"
-        if i == 1 then
-            authors_str = author_name
-        else
-            authors_str = authors_str .. ", " .. author_name
-        end
-    end
-
-    -- Store the vehicle's lag cost along with peer_id, group_id, and is_ws flag
+    -- Store the vehicle's lag cost along with peer_id, group_id, and other info
     vehicle_lag_costs[vehicle_id] = {
         lag_cost = total_lag_cost,
         peer_id = peer_id,
         group_id = group_id,
-        is_ws = is_ws_vehicle
+        is_ws = is_ws_vehicle,
+        vehicle_name = vehicle_name,
+        vehicle_authors = vehicle_authors
     }
 
     -- Update the player's total lag cost
@@ -342,29 +424,9 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
         server.announce("[DEBUG]", "Total lag cost for player " .. peer_id .. ": " .. player_lag_costs[peer_id], -1)
     end
 
-    -- Announce vehicle spawn information
-    local message = "Vehicle Spawned:\n"
-    message = message .. "Player: " .. player_name .. "\n"
-    message = message .. "Vehicle Name: " .. vehicle_name .. "\n"
-    message = message .. "Authors: " .. authors_str .. "\n"
-    message = message .. "Group ID: " .. group_id .. "\n"
-    message = message .. "Lag Cost: " .. total_lag_cost
-
-    server.announce("[MAL]", message)
-
-    -- Determine lag cost limit based on whether it's a workshop vehicle
-    local lag_cost_limit = PLAYER_LAG_COST_LIMIT
-    if is_ws_vehicle then
-        lag_cost_limit = PLAYER_LAG_COST_LIMIT_WS
-    end
-
-    -- Check if the player's lag cost exceeds the limit
-    if player_lag_costs[peer_id] > lag_cost_limit then
-        -- Despawn the player's vehicles
-        despawnPlayerVehicles(peer_id)
-        server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
-    end
+    -- Removed per-vehicle announcement
 end
+
 
 -- Function to despawn all vehicles belonging to a player
 function despawnPlayerVehicles(peer_id)
