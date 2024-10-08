@@ -232,6 +232,9 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
         end
         return
     end
+    if is_success then
+        local total_lag_cost = 0
+
 
         -- Include voxel count in lag cost
         local voxel_count = vehicle_components["voxels"] or 0
