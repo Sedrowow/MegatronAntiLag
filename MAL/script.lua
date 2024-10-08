@@ -84,9 +84,7 @@ function handleReloadCountdown()
             -- Remove the popup screen
             server.removePopup(-1, 0)
                 -- Initialize or reset variables and tables
-            TIME = server.getTimeMillisec()
-            TICKS = 0
-            TPS = 0    
+            TIME = server.getTimeMillisec()    
             tps_countdown = nil
             tps_warning_issued = false
             emergency_cleanup_countdown = nil
