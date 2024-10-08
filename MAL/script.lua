@@ -222,11 +222,16 @@ function updateGroupTPSImpact()
 end
 
 -- Function to calculate the lag cost for a single vehicle
+-- Function to calculate the lag cost for a single vehicle
 function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
-    local vehicle_components, is_success = server.getVehicleComponents(vehicle_id)
-
-    if is_success then
-        local total_lag_cost = 0
+    -- Before calculating lag cost, check if the vehicle still exists
+    local vehicle_data, is_success = server.getVehicleData(vehicle_id)
+    if not is_success then
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " does not exist. Skipping lag cost calculation.", -1)
+        end
+        return
+    end
 
         -- Include voxel count in lag cost
         local voxel_count = vehicle_components["voxels"] or 0
@@ -299,7 +304,6 @@ function despawnVehicleGroup(group_id)
 end
 
 -- Function to handle vehicle despawning
--- Function to handle vehicle despawning
 function onVehicleDespawn(vehicle_id, peer_id)
     if debug_mode then
         server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id, -1)
@@ -316,6 +320,29 @@ function onVehicleDespawn(vehicle_id, peer_id)
     -- Retrieve vehicle info
     local vehicle_info = vehicle_lag_costs[vehicle_id]
     if vehicle_info then
+        local owner_peer_id = vehicle_info.peer_id
+        local group_id = vehicle_info.group_id
+        local lag_cost = vehicle_info.lag_cost
+
+        -- Update player's lag cost
+        if player_lag_costs[owner_peer_id] then
+            player_lag_costs[owner_peer_id] = player_lag_costs[owner_peer_id] - lag_cost
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Updated lag cost for player " .. owner_peer_id .. ": " .. (player_lag_costs[owner_peer_id] or 0), -1)
+            end
+
+            if player_lag_costs[owner_peer_id] <= 0 then
+                player_lag_costs[owner_peer_id] = nil
+                if debug_mode then
+                    server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more lag cost.", -1)
+                end
+            end
+        end
+
+        -- Remove vehicle from tracking
+        vehicle_lag_costs[vehicle_id] = nil
+
         -- Remove vehicle from player's group
         if player_vehicle_groups[owner_peer_id] and player_vehicle_groups[owner_peer_id][group_id] then
             local group = player_vehicle_groups[owner_peer_id][group_id]
@@ -348,11 +375,66 @@ function onVehicleDespawn(vehicle_id, peer_id)
             end
         end
     else
-        if debug_mode then
-            server.announce("[DEBUG]", "Vehicle info not found for ID " .. vehicle_id, -1)
+        -- Vehicle lag cost was not calculated (e.g., despawned before simulating)
+        -- Attempt to retrieve owner_peer_id and group_id from tracking data
+        local owner_peer_id = nil
+        local group_id = nil
+
+        -- Check if vehicle exists in any player's vehicle groups
+        for peer_id, groups in pairs(player_vehicle_groups) do
+            for g_id, vehicles in pairs(groups) do
+                for i, v_id in ipairs(vehicles) do
+                    if v_id == vehicle_id then
+                        owner_peer_id = peer_id
+                        group_id = g_id
+                        -- Remove vehicle from the group
+                        table.remove(vehicles, i)
+                        break
+                    end
+                end
+                if owner_peer_id then
+                    -- If group is empty, remove it
+                    if #vehicles == 0 then
+                        player_vehicle_groups[owner_peer_id][group_id] = nil
+                        group_peer_mapping[group_id] = nil
+                        if debug_mode then
+                            server.announce("[DEBUG]", "Removed empty group " .. group_id .. " for player " .. owner_peer_id, -1)
+                        end
+
+                        -- Check if player has any more groups
+                        if next(player_vehicle_groups[owner_peer_id]) == nil then
+                            player_vehicle_groups[owner_peer_id] = nil
+                            if debug_mode then
+                                server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more vehicle groups.", -1)
+                            end
+                        end
+                    end
+                    break
+                end
+            end
+            if owner_peer_id then
+                break
+            end
+        end
+
+        if owner_peer_id then
+            -- Since we never calculated lag cost, we might not have added it to player_lag_costs
+            -- Ensure player_lag_costs entry exists
+            if player_lag_costs[owner_peer_id] then
+                -- If necessary, adjust player's lag cost (if we had an estimated lag cost)
+                -- For this case, since lag cost was not added, we do not need to subtract it
+                if debug_mode then
+                    server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned before lag cost calculation. No lag cost to remove for player " .. owner_peer_id, -1)
+                end
+            end
+        else
+            if debug_mode then
+                server.announce("[DEBUG]", "Vehicle info not found for ID " .. vehicle_id .. " in any tracking data.", -1)
+            end
         end
     end
 end
+
 
 
 -- Function to calculate and update TPS
