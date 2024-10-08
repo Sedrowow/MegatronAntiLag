@@ -1,19 +1,22 @@
 -- Define the maximum allowable lag cost per player
-local PLAYER_LAG_COST_LIMIT = 100  -- Adjust this value as needed
+local PLAYER_LAG_COST_LIMIT = 1000  -- Adjust this value as needed
 
 -- Component lag costs for each type
 local COMPONENT_LAG_COSTS = {
-    ["signs"] = 1,
+    ["signs"] = 3,
     ["seats"] = 2,
-    ["buttons"] = 1,
-    ["dials"] = 1,
+    ["buttons"] = 2,
+    ["dials"] = 2,
     ["tanks"] = 5,
     ["batteries"] = 10,
     ["hoppers"] = 7,
     ["guns"] = 20,
-    ["rope_hooks"] = 3,
+    ["rope_hooks"] = 4,
     -- Add more component types and their respective lag costs here
 }
+
+-- Define the lag cost per voxel
+local VOXEL_LAG_COST = 1  -- Adjust this value as needed
 
 -- Tables to store tracking data
 local vehicle_lag_costs = {}         -- [vehicle_id] = {lag_cost = number, peer_id = number, group_id = number}
@@ -73,6 +76,11 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     if is_success then
         local total_lag_cost = 0
 
+        -- Include voxel count in lag cost
+        local voxel_count = vehicle_components["voxels"] or 0
+        local voxel_lag_cost = voxel_count * VOXEL_LAG_COST
+        total_lag_cost = total_lag_cost + voxel_lag_cost
+
         -- Loop through each component type and calculate lag cost
         for component_type, components in pairs(vehicle_components["components"]) do
             if COMPONENT_LAG_COSTS[component_type] then
@@ -108,6 +116,9 @@ function despawnPlayerVehicles(peer_id)
             server.despawnVehicleGroup(group_id, true)
             -- group_id will be handled in onVehicleDespawn
         end
+
+        -- Notify the player
+        server.announce("Server", "Your vehicles have been despawned due to exceeding the lag cost limit.", peer_id)
     end
 end
 
