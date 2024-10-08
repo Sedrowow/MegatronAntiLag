@@ -133,7 +133,6 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
 end
 
 -- Function to check vehicle loading and calculate lag cost when ready
--- Function to check vehicle loading and calculate lag cost when ready
 function updateVehicleLoading()
     for vehicle_id, info in pairs(vehicle_loading) do
         local vehicle_data, is_success = server.getVehicleData(vehicle_id)
@@ -165,21 +164,45 @@ function updateVehicleLoading()
     end
 end
 
+
 -- Function to check if all vehicles in a group are simulating
 function areAllGroupVehiclesSimulating(group_id)
     local peer_id = group_peer_mapping[group_id]
+    if not peer_id then
+        if debug_mode then
+            server.announce("[DEBUG]", "Group ID " .. group_id .. " not found in group_peer_mapping.", -1)
+        end
+        return false
+    end
+
+    if not player_vehicle_groups[peer_id] then
+        if debug_mode then
+            server.announce("[DEBUG]", "No vehicle groups found for peer ID " .. peer_id, -1)
+        end
+        return false
+    end
+
     local vehicles = player_vehicle_groups[peer_id][group_id]
+    if not vehicles then
+        if debug_mode then
+            server.announce("[DEBUG]", "Group ID " .. group_id .. " not found under peer ID " .. peer_id .. " in player_vehicle_groups.", -1)
+        end
+        return false
+    end
+
     for _, vehicle_id in ipairs(vehicles) do
         local vehicle_data, is_success = server.getVehicleData(vehicle_id)
         if not (is_success and vehicle_data["simulating"]) then
             return false
         end
     end
+
     if debug_mode then
-        server.announce("[DEBUG]", "All vehicles in group " .. group_id .. " are now simulating.")
+        server.announce("[DEBUG]", "All vehicles in group " .. group_id .. " are now simulating.", -1)
     end
     return true
 end
+
 
 -- Function to measure the TPS impact of a vehicle group
 function measureGroupTPSImpact(group_id)
