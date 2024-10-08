@@ -231,7 +231,7 @@ end
 -- Function to handle vehicle despawning
 function onVehicleDespawn(vehicle_id, peer_id)
     if debug_mode then
-        server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id)
+        server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id, -1)
     end
 
     -- Retrieve vehicle info
@@ -242,18 +242,27 @@ function onVehicleDespawn(vehicle_id, peer_id)
         local lag_cost = vehicle_info.lag_cost
 
         -- Update player's lag cost
-        player_lag_costs[owner_peer_id] = player_lag_costs[owner_peer_id] - lag_cost
+        if player_lag_costs[owner_peer_id] then
+            player_lag_costs[owner_peer_id] = player_lag_costs[owner_peer_id] - lag_cost
 
-        if debug_mode then
-            server.announce("[DEBUG]", "Updated lag cost for player " .. owner_peer_id .. ": " .. player_lag_costs[owner_peer_id])
+            if debug_mode then
+                server.announce("[DEBUG]", "Updated lag cost for player " .. owner_peer_id .. ": " .. (player_lag_costs[owner_peer_id] or 0), -1)
+            end
+
+            if player_lag_costs[owner_peer_id] <= 0 then
+                player_lag_costs[owner_peer_id] = nil
+                if debug_mode then
+                    server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more lag cost.", -1)
+                end
+            end
         end
 
         -- Remove vehicle from tracking
         vehicle_lag_costs[vehicle_id] = nil
 
         -- Remove vehicle from player's group
-        local group = player_vehicle_groups[owner_peer_id][group_id]
-        if group then
+        if player_vehicle_groups[owner_peer_id] and player_vehicle_groups[owner_peer_id][group_id] then
+            local group = player_vehicle_groups[owner_peer_id][group_id]
             for i, v_id in ipairs(group) do
                 if v_id == vehicle_id then
                     table.remove(group, i)
@@ -266,21 +275,29 @@ function onVehicleDespawn(vehicle_id, peer_id)
                 player_vehicle_groups[owner_peer_id][group_id] = nil
                 group_peer_mapping[group_id] = nil
                 if debug_mode then
-                    server.announce("[DEBUG]", "Removed empty group " .. group_id .. " for player " .. owner_peer_id)
+                    server.announce("[DEBUG]", "Removed empty group " .. group_id .. " for player " .. owner_peer_id, -1)
+                end
+
+                -- Check if player has any more groups
+                if next(player_vehicle_groups[owner_peer_id]) == nil then
+                    player_vehicle_groups[owner_peer_id] = nil
+                    if debug_mode then
+                        server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more vehicle groups.", -1)
+                    end
                 end
             end
-        end
-
-        -- If player has no more vehicles, remove them from tracking
-        if next(player_vehicle_groups[owner_peer_id]) == nil then
-            player_vehicle_groups[owner_peer_id] = nil
-            player_lag_costs[owner_peer_id] = nil
+        else
             if debug_mode then
-                server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more vehicles.")
+                server.announce("[DEBUG]", "Group " .. group_id .. " not found for player " .. owner_peer_id, -1)
             end
+        end
+    else
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle info not found for ID " .. vehicle_id, -1)
         end
     end
 end
+
 
 -- Function to calculate and update TPS
 function updateTPS(game_ticks)
