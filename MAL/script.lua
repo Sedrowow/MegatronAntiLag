@@ -350,7 +350,7 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     message = message .. "Group ID: " .. group_id .. "\n"
     message = message .. "Lag Cost: " .. total_lag_cost
 
-    server.announce("[MAL]", message, peer_id)
+    server.announce("[MAL]", message)
 
     -- Determine lag cost limit based on whether it's a workshop vehicle
     local lag_cost_limit = PLAYER_LAG_COST_LIMIT
