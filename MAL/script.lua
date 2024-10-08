@@ -133,24 +133,33 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
 end
 
 -- Function to check vehicle loading and calculate lag cost when ready
+-- Function to check vehicle loading and calculate lag cost when ready
 function updateVehicleLoading()
     for vehicle_id, info in pairs(vehicle_loading) do
         local vehicle_data, is_success = server.getVehicleData(vehicle_id)
-        if is_success and vehicle_data["simulating"] then
-            if debug_mode then
-                server.announce("[DEBUG]", "Vehicle is now simulating: ID=" .. vehicle_id)
+        if is_success then
+            if vehicle_data["simulating"] then
+                if debug_mode then
+                    server.announce("[DEBUG]", "Vehicle is now simulating: ID=" .. vehicle_id)
+                end
+
+                -- Vehicle is loaded; calculate lag cost
+                calculateVehicleLagCost(vehicle_id, info.peer_id, info.group_id)
+
+                -- Remove from loading list
+                vehicle_loading[vehicle_id] = nil
+
+                -- Check if all vehicles in the group are simulating
+                if areAllGroupVehiclesSimulating(info.group_id) then
+                    -- Measure TPS impact
+                    measureGroupTPSImpact(info.group_id)
+                end
             end
-
-            -- Vehicle is loaded; calculate lag cost
-            calculateVehicleLagCost(vehicle_id, info.peer_id, info.group_id)
-
-            -- Remove from loading list
+        else
+            -- Vehicle no longer exists; remove from loading list
             vehicle_loading[vehicle_id] = nil
-
-            -- Check if all vehicles in the group are simulating
-            if areAllGroupVehiclesSimulating(info.group_id) then
-                -- Measure TPS impact
-                measureGroupTPSImpact(info.group_id)
+            if debug_mode then
+                server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " not found. Removed from loading list.", -1)
             end
         end
     end
@@ -290,37 +299,23 @@ function despawnVehicleGroup(group_id)
 end
 
 -- Function to handle vehicle despawning
+-- Function to handle vehicle despawning
 function onVehicleDespawn(vehicle_id, peer_id)
     if debug_mode then
         server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id, -1)
     end
 
+    -- Remove vehicle from loading list if it's there
+    if vehicle_loading[vehicle_id] then
+        vehicle_loading[vehicle_id] = nil
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " removed from loading list.", -1)
+        end
+    end
+
     -- Retrieve vehicle info
     local vehicle_info = vehicle_lag_costs[vehicle_id]
     if vehicle_info then
-        local owner_peer_id = vehicle_info.peer_id
-        local group_id = vehicle_info.group_id
-        local lag_cost = vehicle_info.lag_cost
-
-        -- Update player's lag cost
-        if player_lag_costs[owner_peer_id] then
-            player_lag_costs[owner_peer_id] = player_lag_costs[owner_peer_id] - lag_cost
-
-            if debug_mode then
-                server.announce("[DEBUG]", "Updated lag cost for player " .. owner_peer_id .. ": " .. (player_lag_costs[owner_peer_id] or 0), -1)
-            end
-
-            if player_lag_costs[owner_peer_id] <= 0 then
-                player_lag_costs[owner_peer_id] = nil
-                if debug_mode then
-                    server.announce("[DEBUG]", "Player " .. owner_peer_id .. " has no more lag cost.", -1)
-                end
-            end
-        end
-
-        -- Remove vehicle from tracking
-        vehicle_lag_costs[vehicle_id] = nil
-
         -- Remove vehicle from player's group
         if player_vehicle_groups[owner_peer_id] and player_vehicle_groups[owner_peer_id][group_id] then
             local group = player_vehicle_groups[owner_peer_id][group_id]
