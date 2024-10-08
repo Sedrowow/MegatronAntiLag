@@ -1,5 +1,5 @@
 -- Define the maximum allowable lag cost per player
-local PLAYER_LAG_COST_LIMIT = 2000  -- Adjust this value as needed
+local PLAYER_LAG_COST_LIMIT = 5000  -- Adjust this value as needed
 
 -- Component lag costs for each type
 local COMPONENT_LAG_COSTS = {
@@ -29,7 +29,7 @@ local TICKS = 0
 local TPS = 0
 
 -- Emergency Cleanup Variables
-local emergency_cleanup_tps = 10  -- Default TPS threshold for emergency cleanup
+local emergency_cleanup_tps = 5  -- Default TPS threshold for emergency cleanup
 local emergency_cleanup_countdown = nil
 local emergency_cleanup_start_time = nil
 
@@ -91,7 +91,7 @@ function handleReloadCountdown()
             tps_warning_issued = false
             emergency_cleanup_countdown = nil
             emergency_cleanup_start_time = nil
-        
+            server.cleanVehicles()
             -- Reset tracking tables
             vehicle_lag_costs = {}
             vehicle_loading = {}
@@ -379,7 +379,7 @@ function updateTPS(game_ticks)
     end
 
     -- Optionally, display TPS
-    server.setPopupScreen(-1, 1, "TPS", true, "TPS: " .. tostring(TPS), 0.9, 0.8)
+    server.setPopupScreen(-1, 3, "TPS", true, "TPS: " .. tostring(TPS), 0.9, 0.8)
 
     -- Check if TPS is below threshold
     if TPS < TPS_THRESHOLD then
@@ -394,8 +394,10 @@ function updateTPS(game_ticks)
         end
     else
         if tps_countdown then
+            -- Remove the TPS countdown popup if TPS recovers
+            server.removePopup(-1, 1)
             if debug_mode then
-                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.")
+                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.", -1)
             end
         end
         tps_countdown = nil
@@ -407,12 +409,19 @@ function updateTPS(game_ticks)
         if not emergency_cleanup_countdown then
             emergency_cleanup_countdown = 2500  -- milliseconds
             emergency_cleanup_start_time = tempo
-            server.notify(-1, "[MAL]", "Emergency cleanup initiated due to very low TPS!", 1)  -- Notification type 1: new_mission_critical
+            -- Display the emergency cleanup popup
+            local message = "Emergency cleanup in 2 seconds due to very low TPS."
+            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
+
             if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup initiated.")
+                server.announce("[DEBUG]", "Emergency cleanup initiated.", -1)
             end
         end
     else
+        if emergency_cleanup_countdown then
+            -- Remove the emergency cleanup popup if TPS recovers
+            server.removePopup(-1, 2)
+        end
         emergency_cleanup_countdown = nil
     end
 end
@@ -423,31 +432,28 @@ function handleTPSCountdown()
     if tps_countdown then
         local tempo = server.getTimeMillisec()
         local elapsed_time = (tempo - tps_countdown_start_time) / 1000  -- Convert to seconds
-        local remaining_time = tps_countdown - elapsed_time
+        local remaining_time = math.ceil(tps_countdown - elapsed_time)
 
-        if not tps_warning_issued then
-            -- Notify all players once
-            server.announce("[MAL]", "[MAL] TPS is low! Removing high-lag vehicles in " .. math.ceil(remaining_time) .. " seconds.", -1)
-            tps_warning_issued = true
-
-            if debug_mode then
-                server.announce("[DEBUG]", "Issued low TPS warning to all players.")
-            end
-        end
-
-        if remaining_time <= 0 then
+        if remaining_time > 0 then
+            -- Update the popup screen with the remaining time
+            local message = "Server TPS is low!\nRemoving high-lag vehicles in " .. remaining_time .. " seconds."
+            server.setPopupScreen(-1, 1, "[MAL] Low TPS Warning", true, message, 0.5, 0.4)  -- Position slightly above center
+        else
+            -- Countdown has finished
+            -- Remove the popup screen
+            server.removePopup(-1, 1)
             -- Despawn the vehicle with the highest lag cost
             despawnHighestLagVehicle()
             tps_countdown = nil
             tps_warning_issued = false
-            tps_warning_issued = true
-            server.notify(-1, "[MAL]", "Countdown finished. Despawning highest lag vehicle.",1)
+
             if debug_mode then
-                server.announce("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.")
+                server.announce("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.", -1)
             end
         end
     end
 end
+
 
 
 -- Function to handle emergency cleanup countdown
@@ -455,23 +461,32 @@ function handleEmergencyCleanup()
     if emergency_cleanup_countdown then
         local current_time = server.getTimeMillisec()
         local elapsed_time = current_time - emergency_cleanup_start_time
-        if elapsed_time >= emergency_cleanup_countdown then
+        local remaining_time = math.ceil((emergency_cleanup_countdown - elapsed_time) / 1000)
+
+        if remaining_time > 0 then
+            -- Update the popup screen with the remaining time
+            local message = "Emergency cleanup in " .. remaining_time .. " seconds due to very low TPS."
+            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.", -1)
+            end
+        else
+            -- Countdown has finished
+            -- Remove the popup screen
+            server.removePopup(-1, 2)
             -- Time to perform emergency cleanup
             server.cleanVehicles()
             server.notify(-1, "[MAL]", "Emergency cleanup executed due to very low TPS.", 1)
             if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup executed.")
+                server.announce("[DEBUG]", "Emergency cleanup executed.", -1)
             end
             emergency_cleanup_countdown = nil
-        else
-            local remaining_time = math.ceil((emergency_cleanup_countdown - elapsed_time) / 1000)
-            server.announce("[MAL]", "Emergency cleanup in " .. remaining_time .. " seconds due to very low TPS.")
-            if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.")
-            end
         end
     end
 end
+
+
 
 -- Function to despawn the vehicle with the highest lag cost
 function despawnHighestLagVehicle()
