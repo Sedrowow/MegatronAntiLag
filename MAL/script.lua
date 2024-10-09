@@ -115,6 +115,14 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
         server.announce("[DEBUG]", "Vehicle spawned: ID=" .. vehicle_id .. ", Peer ID=" .. peer_id .. ", Group ID=" .. group_id)
     end
 
+    -- If peer_id is 0, it's the server or an addon; ignore this vehicle
+    if peer_id == 0 then
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Ignoring.", -1)
+        end
+        return
+    end
+
     -- Store the group with the associated peer_id if not already stored
     if not group_peer_mapping[group_id] then
         group_peer_mapping[group_id] = peer_id
@@ -136,7 +144,8 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
     vehicle_loading[vehicle_id] = {peer_id = peer_id, group_id = group_id}
 end
 
--- Function to check vehicle loading and calculate lag cost when ready
+
+
 -- Function to check vehicle loading and calculate lag cost when ready
 function updateVehicleLoading()
     for vehicle_id, info in pairs(vehicle_loading) do
@@ -213,6 +222,13 @@ end
 
 -- Function to announce the group spawn
 function announceGroupSpawn(group_id, peer_id)
+    -- If peer_id is 0, it's the server or an addon; do not announce
+    if peer_id == 0 then
+        if debug_mode then
+            server.announce("[DEBUG]", "Group " .. group_id .. " spawned by server/addon (peer_id 0). Not announcing.", -1)
+        end
+        return
+    end
     local vehicles = player_vehicle_groups[peer_id][group_id]
     if not vehicles then
         if debug_mode then
@@ -338,8 +354,14 @@ function updateGroupTPSImpact()
 end
 
 -- Function to calculate the lag cost for a single vehicle
--- Function to calculate the lag cost for a single vehicle
 function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
+    -- If peer_id is 0, it's the server or an addon; ignore this vehicle
+    if peer_id == 0 then
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Skipping lag cost calculation.", -1)
+        end
+        return
+    end
     -- Before calculating lag cost, check if the vehicle still exists
     local vehicle_data, is_success = server.getVehicleData(vehicle_id)
     if not is_success then
@@ -430,6 +452,13 @@ end
 
 -- Function to despawn all vehicles belonging to a player
 function despawnPlayerVehicles(peer_id)
+    -- If peer_id is 0, do not despawn server/addon vehicles
+    if peer_id == 0 then
+        if debug_mode then
+            server.announce("[DEBUG]", "Attempted to despawn vehicles for peer_id 0 (server/addon). Ignoring.", -1)
+        end
+        return
+    end
     local groups = player_vehicle_groups[peer_id]
     if groups then
         for group_id, vehicle_ids in pairs(groups) do
@@ -462,7 +491,15 @@ end
 -- Function to handle vehicle despawning
 function onVehicleDespawn(vehicle_id, peer_id)
     if debug_mode then
-        server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id, -1)
+        server.announce("[DEBUG]", "Vehicle despawned: ID=" .. vehicle_id .. ", Peer ID=" .. peer_id, -1)
+    end
+
+    -- If peer_id is 0, it's the server or an addon; ignore this vehicle
+    if peer_id == 0 then
+        if debug_mode then
+            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned by server/addon (peer_id 0). Ignoring.", -1)
+        end
+        return
     end
 
     -- Remove vehicle from loading list if it's there
@@ -741,7 +778,7 @@ function despawnHighestLagVehicle()
     local vehicle_info_to_despawn = nil  -- Store the info along with the vehicle_id
 
     for vehicle_id, info in pairs(vehicle_lag_costs) do
-        if info and info.lag_cost > highest_lag_cost then
+        if info and info.lag_cost > highest_lag_cost and info.peer_id ~= 0 then
             highest_lag_cost = info.lag_cost
             vehicle_to_despawn = vehicle_id
             vehicle_info_to_despawn = info  -- Store the info here
