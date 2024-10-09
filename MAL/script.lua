@@ -1079,34 +1079,20 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
     elseif command == "?whatislagcost" then
-        
-        --[[
-        local COMPONENT_LAG_COSTS = {
-    ["signs"] = 3,
-    ["seats"] = 2,
-    ["buttons"] = 2,
-    ["dials"] = 2,
-    ["tanks"] = 5,
-    ["batteries"] = 10,
-    ["hoppers"] = 7,
-    ["guns"] = 20,
-    ["rope_hooks"] = 4,
-    -- Add more component types and their respective lag costs here
-}
-        ]]
         local lag_guide = "heres how lag cost is calculated:\n"
-        lag_guide = lagguide .."each voxel: 0.2\n"
-        lag_guide = lagguide .."[signs] = 3,\n"
-        lag_guide = lagguide .."[seats] = 2\n"
-        lag_guide = lagguide .."[buttons] = 2\n"
-        lag_guide = lagguide .."[dials] = 2\n"
-        lag_guide = lagguide .."[tanks] = 5\n"
-        lag_guide = lagguide .."[batteries] = 10\n"
-        lag_guide = lagguide .."[hoppers] = 7\n"
-        lag_guide = lagguide .."[guns] = 20\n"
-        lag_guide = lagguide .."[rope_hooks] = 4\n\n"
-        lag_guide = lagguide .."Everything togerther is the lag cost!"
-        server.announce("[MAL]]", lag_guide, peer_id)
+        lag_guide = lag_guide .."each voxel: 0.2\n"
+        lag_guide = lag_guide .."[signs] = 3,\n"
+        lag_guide = lag_guide .."[seats] = 2\n"
+        lag_guide = lag_guide .."[buttons] = 2\n"
+        lag_guide = lag_guide .."[dials] = 2\n"
+        lag_guide = lag_guide .."[tanks] = 5\n"
+        lag_guide = lag_guide .."[batteries] = 10\n"
+        lag_guide = lag_guide .."[hoppers] = 7\n"
+        lag_guide = lag_guide .."[guns] = 20\n"
+        lag_guide = lag_guide .."[rope_hooks] = 4\n\n"
+        lag_guide = lag_guide .."Everything togerther is the lag cost!"
+        
+        server.announce("[MAL]", lag_guide, peer_id)
         
     elseif command == "?mhelp" then
         local help_message = "Available Commands:\n"
