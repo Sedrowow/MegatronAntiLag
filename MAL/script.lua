@@ -915,7 +915,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
-    elseif command == "?setmaxcostlag" then
+    elseif command == "?maxlagcost" then
         if is_admin then
             local new_limit = tonumber(args[1])
             if new_limit and new_limit >= 1000 and new_limit <= 50000 then
@@ -935,43 +935,50 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     elseif command == "?maxlagcostws" then
         if is_admin then
             local new_limit = tonumber(args[1])
-            if new_limit then
+            if new_limit and new_limit >= 500 and new_limit <= 25000 then
                 PLAYER_LAG_COST_LIMIT_WS = new_limit
                 server.announce("[MAL]", "Set workshop vehicle lag cost limit to " .. new_limit .. ".", -1)
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT_WS to " .. new_limit .. ".", -1)
                 end
-            else
+            elseif not(new_limit) then
                 -- Reset to half of current PLAYER_LAG_COST_LIMIT
                 PLAYER_LAG_COST_LIMIT_WS = PLAYER_LAG_COST_LIMIT / 2
                 server.announce("[MAL]", "Reset workshop vehicle lag cost limit to " .. PLAYER_LAG_COST_LIMIT_WS .. ".", -1)
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " reset PLAYER_LAG_COST_LIMIT_WS to " .. PLAYER_LAG_COST_LIMIT_WS .. ".", -1)
                 end
+            else
+                server.announce("[MAL]", "Invalid value. Please enter a number between 500 and 25000.", peer_id)
             end
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?announce" then
-        local countdown = tonumber(args[1]) or 12  -- Default to 12 seconds
-        if countdown <= 0 then
-            countdown = 12  -- Ensure countdown is positive
+        if is_admin then
+            local countdown = tonumber(args[1]) or 12  -- Default to 12 seconds
+            if countdown <= 0 then
+                countdown = 12  -- Ensure countdown is positive
+            end
+            local full_message = table.concat(args, " ")
+            if tonumber(args[1]) then
+                full_message = table.concat(args, " ", 2)
+            end
+            if full_message == "" then
+                server.announce("[MAL]", "Please provide a message to announce.", peer_id)
+                return
+            end
+            -- Remove any leading question marks or command prefixes
+            full_message = full_message:gsub("^%??announce%s*", "")
+            full_message = full_message:gsub("^%?", "")
+            -- Start the announcement
+            startAnnouncement(peer_id, full_message, countdown)
+            server.announce("[ANNOUNCEMENT]", full_message)
+            server.notify(-1, "[ANNOUNCEMENT]", full_message,8)
+        else
+            server.announce("[MAL]", "You dont have the permission to use this command.", peer_id)
         end
-        local full_message = table.concat(args, " ")
-        if tonumber(args[1]) then
-            full_message = table.concat(args, " ", 2)
-        end
-        if full_message == "" then
-            server.announce("[MAL]", "Please provide a message to announce.", peer_id)
-            return
-        end
-        -- Remove any leading question marks or command prefixes
-        full_message = full_message:gsub("^%??announce%s*", "")
-        full_message = full_message:gsub("^%?", "")
-        -- Start the announcement
-        startAnnouncement(peer_id, full_message, countdown)
-    
     -- NPC Management Commands
     elseif command == "?npc" then
         local name = args[1]
@@ -986,7 +993,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         despawnNPC(peer_id, npc_id)
     elseif command == "?npclist" then
         listNPCs(peer_id)
-    elseif command == "?AIType" then
+    elseif command == "?aiType" then
         local npc_id = tonumber(args[1])
         local ai_state = tonumber(args[2]) or 0  -- Default to 0 (none)
         if not npc_id then
@@ -1007,7 +1014,19 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             repairPlayerVehicles(peer_id)
         end
-
+    elseif command == "?mintps" then
+        if is_admin then
+            local TPS_THRESHOLD = tonumber(args[1])
+            if not TPS_THRESHOLD then
+                TPS_THRESHOLD = 35
+            end
+            server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. TPS_THRESHOLD .. ".", -1)
+            if debug_mode then
+                server.announce("[DEBUG]", "Admin " .. peer_id .. " set emergency cleanup TPS threshold to " .. TPS_THRESHOLD .. ".", -1)
+            end
+        else
+            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+        end
     elseif command == "?cleartps" then
         if is_admin then
             local tps_threshold = tonumber(args[1])
@@ -1038,8 +1057,9 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?debug - Toggle debug mode.\n"
             help_message = help_message .. "?cleanup - Despawn all player vehicles.\n"
             help_message = help_message .. "?clearlag [lag_cost] - Despawn vehicle groups exceeding lag_cost.\n"
-            help_message = help_message .. "?setmaxcostlag <value> - Set maximum lag cost limit.\n"
+            help_message = help_message .. "?maxlagcost <value> - Set maximum lag cost limit.\n"
             help_message = help_message .. "?maxlagcostws [value] - Set workshop vehicle lag cost limit.\n"
+            help_message = help_message .. "?mintps [tps_value] - Set TPS threshold for normal lag despawn.\n"
             help_message = help_message .. "?cleartps [tps_value] - Set TPS threshold for emergency cleanup.\n"
             help_message = help_message .. "?vlag [peer_id] - View another player's lag cost.\n"
         end
