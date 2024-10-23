@@ -116,7 +116,7 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
     end
 
     -- If peer_id is 0, it's the server or an addon; ignore this vehicle
-    if peer_id == 0 then
+    if peer_id < 0 then
         if debug_mode then
             server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Ignoring.", -1)
         end
@@ -223,7 +223,7 @@ end
 -- Function to announce the group spawn
 function announceGroupSpawn(group_id, peer_id)
     -- If peer_id is 0, it's the server or an addon; do not announce
-    if peer_id == 0 then
+    if peer_id < 0 then
         if debug_mode then
             server.announce("[DEBUG]", "Group " .. group_id .. " spawned by server/addon (peer_id 0). Not announcing.", -1)
         end
@@ -356,7 +356,7 @@ end
 -- Function to calculate the lag cost for a single vehicle
 function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     -- If peer_id is 0, it's the server or an addon; ignore this vehicle
-    if peer_id == 0 then
+    if peer_id < 0 then
         if debug_mode then
             server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Skipping lag cost calculation.", -1)
         end
@@ -453,7 +453,7 @@ end
 -- Function to despawn all vehicles belonging to a player
 function despawnPlayerVehicles(peer_id)
     -- If peer_id is 0, do not despawn server/addon vehicles
-    if peer_id == 0 then
+    if peer_id < 0 then
         if debug_mode then
             server.announce("[DEBUG]", "Attempted to despawn vehicles for peer_id 0 (server/addon). Ignoring.", -1)
         end
@@ -495,7 +495,7 @@ function onVehicleDespawn(vehicle_id, peer_id)
     end
 
     -- If peer_id is 0, it's the server or an addon; ignore this vehicle
-    if peer_id == 0 then
+    if peer_id < 0 then
         if debug_mode then
             server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned by server/addon (peer_id 0). Ignoring.", -1)
         end
