@@ -52,6 +52,13 @@ local group_peer_mapping = {}        -- [group_id] = peer_id
 local player_lag_costs = {}          -- [peer_id] = total_lag_cost
 local vehicle_loading = {}           -- [vehicle_id] = {peer_id, group_id}
 local group_tps_impact = {}          -- [group_id] = {pre_tps = number, check_time = number}
+local player_antisteal = {}  -- [peer_id] = is_antisteal_enabled
+
+local disconnected_players = {} -- [steam_id] = {despawn_time = number, peer_id = number}
+local DISCONNECT_DESPAWN_DELAY = 120 -- 2 minutes in seconds
+
+local player_pvp = {}        -- [peer_id] = is_pvp_enabled
+local player_pvp_popups = {} -- [peer_id] = ui_id
 
 function onCreate(is_world_create)
     if not is_world_create then
@@ -102,6 +109,7 @@ function handleReloadCountdown()
             player_vehicle_groups = {}
             player_lag_costs = {}
             player_npcs = {}
+            player_antisteal = {}
             if debug_mode then
                 server.announce("[DEBUG]", "Reload countdown completed and cleanup commenced. Resuming normal operations.", -1)
             end
@@ -142,6 +150,28 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
 
     -- Start tracking vehicle loading status
     vehicle_loading[vehicle_id] = {peer_id = peer_id, group_id = group_id}
+
+    -- Apply antisteal state if peer is tracked
+    if peer_id > 0 then  -- Only for actual players
+        local is_antisteal = player_antisteal[peer_id]
+        if is_antisteal ~= nil then
+            server.setVehicleEditable(vehicle_id, not is_antisteal)
+            if debug_mode then
+                server.announce("[DEBUG]", "Applied antisteal state " .. tostring(is_antisteal) .. " to vehicle " .. vehicle_id, -1)
+            end
+        end
+    end
+
+    -- Apply PVP state if peer is tracked
+    if peer_id > 0 then  -- Only for actual players
+        local is_pvp = player_pvp[peer_id]
+        if is_pvp ~= nil then
+            server.setVehicleInvulnerable(vehicle_id, not is_pvp)
+            if debug_mode then
+                server.announce("[DEBUG]", "Applied PVP state " .. tostring(is_pvp) .. " to vehicle " .. vehicle_id, -1)
+            end
+        end
+    end
 end
 
 
@@ -910,7 +940,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
-    elseif command == "?vlag" then
+    elseif command == "?vlag" or command == "?vlist" then
         if args[1] then
             if is_admin then
                 local target_peer_id = tonumber(args[1])
@@ -1094,9 +1124,10 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         
         server.announce("[MAL]", lag_guide, peer_id)
         
-    elseif command == "?mhelp" then
+    elseif command == "?help" then
         local help_message = "Available Commands:\n"
-        help_message = help_message .. "?vlag - Show your current lag cost and remaining lag cost.\n"
+        help_message = help_message .. "?vlag/vlist - Show your current lag cost and remaining lag cost.\n"
+        help_message = help_message .. "?c [group_id] - Despawn your vehicles. If group_id is provided, despawns that specific group.\n"
         help_message = help_message .. "?repair [group_id] - Repair your vehicles. If group_id is provided, repairs that group.\n"
         help_message = help_message .. "?help - Show this help message.\n"
         help_message = help_message .. "?announce <countdown> <message> - Make an announcement with an optional countdown.\n"
@@ -1104,6 +1135,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         help_message = help_message .. "?delnpc [npc_id] - Despawn your NPCs or a specific NPC by ID.\n"
         help_message = help_message .. "?npclist - List your current spawned NPCs.\n"
         help_message = help_message .. "?AIType <npc_id> [ai_state] - Set AI state for your NPC.\n"
+        help_message = help_message .. "?pvp - Toggle PVP mode for your vehicles.\n"
     
         if is_admin then
             help_message = help_message .. "\nAdmin Commands:\n"
@@ -1118,6 +1150,44 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         end
         server.announce("Server", help_message, peer_id)
 
+    elseif command == "?as" or command == "?antisteal" then
+        togglePlayerAntisteal(peer_id)
+        return
+    elseif command == "?c" then
+        local group_id = tonumber(args[1])
+        
+        if group_id then
+            -- Specific group despawn
+            local owner_peer_id = group_peer_mapping[group_id]
+            if owner_peer_id then
+                if is_admin or isPlayerGroupOwner(peer_id, group_id) then
+                    despawnVehicleGroup(group_id)
+                    server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " has been despawned.", 1)
+                    if debug_mode then
+                        server.announce("[DEBUG]", "Player " .. peer_id .. " despawned group " .. group_id)
+                    end
+                else
+                    server.notify(peer_id, "[MAL]", "You don't have permission to despawn this vehicle group.", 2)
+                end
+            else
+                server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " not found.", 2)
+            end
+        else
+            -- Despawn all vehicles owned by the player
+            local groups = player_vehicle_groups[peer_id]
+            if groups and next(groups) then
+                despawnPlayerVehicles(peer_id)
+                server.notify(peer_id, "[MAL]", "All your vehicles have been despawned.", 1)
+                if debug_mode then
+                    server.announce("[DEBUG]", "Player " .. peer_id .. " despawned all their vehicles")
+                end
+            else
+                server.notify(peer_id, "[MAL]", "You have no vehicles to despawn.", 2)
+            end
+        end
+    elseif command == "?pvp" then
+        togglePlayerPVP(peer_id)
+        return
     end
 end
 
@@ -1195,7 +1265,7 @@ function spawnNPC(peer_id, name, char_type)
 end
 
 -- Function to despawn NPCs
-function despawnNPC(peer_id, npc_id)
+function despawnNPC(peer_id, npc_id, is_admin)
     if not player_npcs[peer_id] then
         server.announce("[MAL]", "You have no NPCs to despawn.", peer_id)
         return
@@ -1232,13 +1302,90 @@ function listNPCs(peer_id)
 end
 
 -- Function to set AI state for NPC
-function setNPC_AIState(peer_id, npc_id, ai_state)
+function setNPC_AIState(peer_id, npc_id, ai_state, is_admin)
     if player_npcs[peer_id] and player_npcs[peer_id][npc_id] or is_admin then
         server.setCharacterData(npc_id, 100, true, true)  -- Enable AI
         server.setAIState(npc_id, ai_state)
         server.announce("[MAL]", "Set AI state for NPC ID " .. npc_id .. " to " .. ai_state .. ".", peer_id)
     else
         server.announce("[MAL]", "You do not own NPC with ID " .. npc_id .. ".", peer_id)
+    end
+end
+
+-- Function to toggle antisteal for all vehicles of a player
+function togglePlayerAntisteal(peer_id)
+    -- Get current state or default to true
+    local current_state = player_antisteal[peer_id]
+    if current_state == nil then
+        current_state = true
+    end
+    
+    -- Toggle state
+    local new_state = not current_state
+    player_antisteal[peer_id] = new_state
+    
+    -- Apply to all existing vehicles
+    local vehicles_updated = 0
+    if player_vehicle_groups[peer_id] then
+        for group_id, vehicles in pairs(player_vehicle_groups[peer_id]) do
+            for _, vehicle_id in ipairs(vehicles) do
+                server.setVehicleEditable(vehicle_id, not new_state)
+                vehicles_updated = vehicles_updated + 1
+            end
+        end
+    end
+    
+    -- Notify player
+    local state_text = new_state and "enabled" or "disabled"
+    server.announce("[MAL]", "Antisteal has been " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", peer_id)
+    
+    if debug_mode then
+        server.announce("[DEBUG]", "Player " .. peer_id .. " toggled antisteal to " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", -1)
+    end
+    
+    return new_state
+end
+
+-- Add to onPlayerJoin to initialize antisteal state
+function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
+    -- Initialize antisteal state to true (enabled by default)
+    player_antisteal[peer_id] = true
+    
+    -- Initialize PVP state to false (disabled by default)
+    player_pvp[peer_id] = false
+    
+    -- Cancel despawn timer if player rejoins
+    if disconnected_players[steam_id] then
+        disconnected_players[steam_id] = nil
+        if debug_mode then
+            server.announce("[DEBUG]", "Cancelled disconnect timer for player " .. name .. " (Steam ID: " .. steam_id .. ")", -1)
+        end
+    end
+end
+
+-- Add to onPlayerLeave to clean up
+function onPlayerLeave(steam_id, name, peer_id, is_admin, is_auth)
+    -- Clean up antisteal state
+    player_antisteal[peer_id] = nil
+    
+    -- Clean up PVP state
+    player_pvp[peer_id] = nil
+    
+    -- Remove PVP popup if exists
+    if player_pvp_popups[peer_id] then
+        server.removePopup(-1, player_pvp_popups[peer_id])
+        player_pvp_popups[peer_id] = nil
+    end
+    
+    -- Start despawn timer for player's vehicles
+    if peer_id >= 0 then -- Don't track server/addon vehicles
+        disconnected_players[steam_id] = {
+            despawn_time = server.getTimeMillisec() + (DISCONNECT_DESPAWN_DELAY * 1000),
+            peer_id = peer_id
+        }
+        if debug_mode then
+            server.announce("[DEBUG]", "Started disconnect timer for player " .. name .. " (Steam ID: " .. steam_id .. ")", -1)
+        end
     end
 end
 
@@ -1267,11 +1414,148 @@ function onTick(game_ticks)
         -- Update TPS impact checks
         updateGroupTPSImpact()
 
+        -- Update disconnected players
+        updateDisconnectedPlayers()
+
+        -- Update PVP popups for all players
+        for peer_id, _ in pairs(player_pvp) do
+            if player_pvp[peer_id] then
+                updatePlayerPVPPopup(peer_id)
+            end
+        end
+
+        -- Update PVP status effects (healing and revival)
+        for peer_id, is_pvp in pairs(player_pvp) do
+            if not is_pvp then -- If PVP is disabled
+                -- Get player's character ID
+                local object_id, is_success = server.getPlayerCharacterID(peer_id)
+                if is_success then
+                    -- Get character data
+                    local char_data = server.getObjectData(object_id)
+                    if char_data then
+                        -- Heal if damaged
+                        if char_data.hp < 100 then
+                            server.setCharacterData(object_id, 100, true, false)
+                        end
+                        -- Revive if dead
+                        if char_data.dead or char_data.incapacitated then
+                            server.reviveCharacter(object_id)
+                        end
+                    end
+                end
+            end
+        end
+
         -- Other game logic...
     else
         -- Optionally, you can pause other operations or provide feedback during the countdown
         if debug_mode then
             server.announce("[DEBUG]", "Reload countdown active. Pausing normal operations.", -1)
+        end
+    end
+end
+
+-- Add this function after other helper functions
+function isPlayerGroupOwner(peer_id, group_id)
+    -- If peer_id is admin, they can control any group
+    if player_vehicle_groups[peer_id] and player_vehicle_groups[peer_id][group_id] then
+        return true
+    end
+    return false
+end
+
+-- Add to onTick after other update functions
+function updateDisconnectedPlayers()
+    local current_time = server.getTimeMillisec()
+    
+    for steam_id, data in pairs(disconnected_players) do
+        if current_time >= data.despawn_time then
+            -- Time's up - despawn their vehicles
+            if player_vehicle_groups[data.peer_id] then
+                despawnPlayerVehicles(data.peer_id)
+                if debug_mode then
+                    server.announce("[DEBUG]", "Despawned vehicles for disconnected player (Steam ID: " .. steam_id .. ")", -1)
+                end
+            end
+            -- Remove from tracking
+            disconnected_players[steam_id] = nil
+        end
+    end
+end
+
+-- Function to toggle PVP for a player
+function togglePlayerPVP(peer_id)
+    -- Get current state or default to false (PVP off by default)
+    local current_state = player_pvp[peer_id]
+    if current_state == nil then
+        current_state = false
+    end
+    
+    -- Toggle state
+    local new_state = not current_state
+    player_pvp[peer_id] = new_state
+    
+    -- Apply to all existing vehicles
+    local vehicles_updated = 0
+    if player_vehicle_groups[peer_id] then
+        for group_id, vehicles in pairs(player_vehicle_groups[peer_id]) do
+            for _, vehicle_id in ipairs(vehicles) do
+                server.setVehicleInvulnerable(vehicle_id, not new_state)
+                vehicles_updated = vehicles_updated + 1
+            end
+        end
+    end
+
+    -- If enabling PVP, notify about vulnerability
+    if new_state then
+        server.notify(peer_id, "[MAL]", "Warning: You can now take damage and die while PVP is enabled!", 2)
+    else
+        -- If disabling PVP, heal and revive player immediately
+        local object_id, is_success = server.getPlayerCharacterID(peer_id)
+        if is_success then
+            server.setCharacterData(object_id, 100, true, false)
+            server.reviveCharacter(object_id)
+            server.notify(peer_id, "[MAL]", "You are now invulnerable to damage!", 4)
+        end
+    end
+
+    -- Update PVP popup
+    updatePlayerPVPPopup(peer_id)
+    
+    -- Notify player
+    local state_text = new_state and "enabled" or "disabled"
+    server.announce("[MAL]", "PVP has been " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", peer_id)
+    
+    if debug_mode then
+        server.announce("[DEBUG]", "Player " .. peer_id .. " toggled PVP to " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", -1)
+    end
+    
+    return new_state
+end
+
+-- Function to update PVP popup display
+function updatePlayerPVPPopup(peer_id)
+    -- Remove existing popup if any
+    if player_pvp_popups[peer_id] then
+        server.removePopup(-1, player_pvp_popups[peer_id])
+        player_pvp_popups[peer_id] = nil
+    end
+
+    -- If PVP is enabled, create new popup
+    if player_pvp[peer_id] then
+        -- Get a unique UI ID for this player's popup
+        local ui_id = server.getMapID()
+        player_pvp_popups[peer_id] = ui_id
+
+        -- Get player position to attach popup to
+        local player_pos = server.getPlayerPos(peer_id)
+        if player_pos then
+            -- Create popup above player
+            server.setPopup(-1, ui_id, "PVP", true, "[PVP ENABLED]", 
+                          player_pos[13], -- x
+                          player_pos[14] + 2, -- y (2 meters above player)
+                          player_pos[15], -- z
+                          25) -- visible from 25 meters away
         end
     end
 end
