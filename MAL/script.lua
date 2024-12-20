@@ -177,6 +177,10 @@ end
 
 
 -- Function to check vehicle loading and calculate lag cost when ready
+-- Add this at the top of your script with other variable declarations
+local notified_groups = {}  -- [group_id] = true if the group has been notified
+
+-- Function to check vehicle loading and calculate lag cost when ready
 function updateVehicleLoading()
     for vehicle_id, info in pairs(vehicle_loading) do
         local vehicle_data, is_success = server.getVehicleData(vehicle_id)
@@ -194,11 +198,16 @@ function updateVehicleLoading()
 
                 -- Check if all vehicles in the group are simulating
                 if areAllGroupVehiclesSimulating(info.group_id) then
-                    -- Announce the group spawn
-                    announceGroupSpawn(info.group_id, info.peer_id)
+                    -- Check if the group has already been notified
+                    if not notified_groups[info.group_id] then
+                        -- Announce the group spawn
+                        announceGroupSpawn(info.group_id, info.peer_id)
+                        -- Mark the group as notified
+                        notified_groups[info.group_id] = true
 
-                    -- Measure TPS impact
-                    measureGroupTPSImpact(info.group_id)
+                        -- Measure TPS impact
+                        measureGroupTPSImpact(info.group_id)
+                    end
                 end
             end
         else
