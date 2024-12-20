@@ -110,6 +110,17 @@ function handleReloadCountdown()
             player_lag_costs = {}
             player_npcs = {}
             player_antisteal = {}
+
+            -- Iterate through all players and disable PvP, enable antisteal
+            local players = server.getPlayers()
+            for _, player in pairs(players) do
+                local peer_id = player.id
+                player_pvp[peer_id] = false
+                player_antisteal[peer_id] = true
+                server.setVehicleInvulnerable(peer_id, true)
+                server.announce("[MAL]", "PvP has been disabled and antisteal enabled for all players after reload.", peer_id)
+            end
+
             if debug_mode then
                 server.announce("[DEBUG]", "Reload countdown completed and cleanup commenced. Resuming normal operations.", -1)
             end
