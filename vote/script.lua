@@ -135,7 +135,7 @@ function cNameStr(id)
 end
 
 function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command, arg1, arg2)
-	if command=="?delobjs" and is_auth then
+	if command=="?delobjs" and is_admin then
 		count=0
 		for i=1,99999 do
 			is_success = server.despawnObject(i, true)
@@ -143,14 +143,6 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		end
 		server.notify(user_id, "server-command", "removed "..tostring(count).." items/objects", 7)
 	end
-	if (command == "?votehelp") then
-            local commands = createList(
-            commands, 
-            function(commands) return true end, 
-            function(commands) return help end
-        )
-		announce(help, peer_id)
-        end
 	if command == "?vote" then
 		
 		local Voted = hasVoteddata[user_peer_id]
@@ -216,17 +208,17 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 			end
 		end
 		if arg1 == "text" then
-		    if not isVoteInProgress() then
-		        voteStart(0.5, 4)
-		        full_message = full_message:gsub("%^?vote text ","")
-		        full_message = full_message:gsub("%?","")
-		        server.announce("[VOTE]","Started text Vote, '?vote yes' to agree, or '?vote no' to disagree!")
+			if not isVoteInProgress() then
+		       		voteStart(0.5, 4)
+		        	full_message = full_message:gsub("%^?vote text ","")
+		        	full_message = full_message:gsub("%?","")
+		        	server.announce("[VOTE]","Started text Vote, '?vote yes' to agree, or '?vote no' to disagree!")
 				server.notify(-1,"[VOTE]", cNameStr(user_peer_id).." Started vote: \n"..full_message,8)
 				votetext = full_message
-		    else
+			else
 		        VoteInProgress(user_peer_id)
-            end
-        end
+			end
+        	end
 		if arg1 == "vevo" and is_admin then
 			if isVoteInProgress() then
 				voteEnd()
@@ -236,8 +228,15 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 			end
 		end
 		
+		if (arg1 == "help") then
+	        	local commands = createList(
+        		commands, 
+        		function(commands) return true end, 
+        		function(commands) return help end
+        		)
+			announce(help, peer_id)
+        	end
 	end
-	
 	if is_admin then	
 		if command == "?min-kick-req" then
 			val = clamp(arg1,0,1)
