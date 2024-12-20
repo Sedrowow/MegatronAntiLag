@@ -327,7 +327,7 @@ function announceGroupSpawn(group_id, peer_id)
     message = message .. "Group ID: " .. group_id .. "\n"
     message = message .. "Total Lag Cost: " .. total_lag_cost
 
-    server.announce("[MAL]", message)
+    server.notify("[MAL]", message, 4)
 
     -- Determine lag cost limit based on whether it's a workshop vehicle
     local lag_cost_limit = PLAYER_LAG_COST_LIMIT
