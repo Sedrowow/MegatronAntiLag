@@ -96,7 +96,7 @@ local warning_countdowns = {}
 
 function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
     player_ui_ids[peer_id] = peer_id
-    local ui_id = peer_id * 100 + player_ui_ids[peer_id]
+    ui_id = peer_id * 100 + player_ui_ids[peer_id]
 
     -- Check for temp ban
     local is_temp_banned = checkTempBanOnJoin(peer_id, steam_id, is_admin)
@@ -209,7 +209,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     command = string.lower(command)
     local args = {...}
     player_ui_ids[peer_id] = player_ui_ids[peer_id] or peer_id
-    local ui_id = peer_id * 100 + player_ui_ids[peer_id]
+    ui_id = peer_id * 100 + player_ui_ids[peer_id]
 
     if command == "?rules" then
         local rulesText = table.concat(rules, "\n")
@@ -218,7 +218,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         if not is_auth then
             removePopup(peer_id, ui_id)
             player_ui_ids[peer_id] = player_ui_ids[peer_id] + 1
-            local ui_id2 = peer_id * 101 + player_ui_ids[peer_id]
+            ui_id2 = peer_id * 101 + player_ui_ids[peer_id]
             showPopup(peer_id, ui_id2, "To get auth, type \n?auth " .. peer_id .. " accept")
         end
     elseif command == "?help" then
@@ -245,7 +245,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         if peer_id == peerID and two == "accept" then
             server.addAuth(peer_id)
             announce("You have been granted auth", peer_id)
-            removePopup(peer_id, ui_id)
+            removePopup(peer_id, ui_id2)
         else
             announce("That is not your player_id! Your player id is: '" .. peer_id .. "'!", peer_id)
         end
