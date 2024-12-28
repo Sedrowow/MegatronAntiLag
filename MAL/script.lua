@@ -1058,6 +1058,101 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             repairPlayerVehicles(peer_id)
         end
+        elseif command == "?tp" then
+        if args[1] and args[2] and args[3] then
+            local target_type = args[1]:lower()
+            local action = args[2]:lower()
+            local target_id = tonumber(args[3])
+
+            if target_type == "p" then
+                if action == "b" or action == "bring" then
+                    if is_admin then
+                        local target_pos, is_success = server.getPlayerPos(target_id)
+                        if is_success then
+                            local player_pos, is_success = server.getPlayerPos(peer_id)
+                            if is_success then
+                                server.setPlayerPos(target_id, player_pos)
+                                server.announce("[MAL]", "Player " .. target_id .. " has been brought to you.", peer_id)
+                            else
+                                server.announce("[MAL]", "Failed to get your position.", peer_id)
+                            end
+                        else
+                            server.announce("[MAL]", "Failed to get target player's position.", peer_id)
+                        end
+                    else
+                        server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+                    end
+                elseif action == "g" or action == "goto" then
+                    local target_pos, is_success = server.getPlayerPos(target_id)
+                    if is_success then
+                        server.setPlayerPos(peer_id, target_pos)
+                        server.announce("[MAL]", "You have been teleported to player " .. target_id .. ".", peer_id)
+                    else
+                        server.announce("[MAL]", "Failed to get target player's position.", peer_id)
+                    end
+                else
+                    server.announce("[MAL]", "Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
+                end
+            elseif target_type == "v" then
+                if action == "b" or action == "bring" then
+                    if is_admin or isPlayerGroupOwner(peer_id, target_id) then
+                        local player_pos, is_success = server.getPlayerPos(peer_id)
+                        if is_success then
+                            local vehicle_ids, is_success = server.getVehicleGroup(target_id)
+                            if is_success then
+                                for _, vehicle_id in ipairs(vehicle_ids) do
+                                    server.setVehiclePos(vehicle_id, player_pos)
+                                end
+                                server.announce("[MAL]", "Vehicle group " .. target_id .. " has been brought to you.", peer_id)
+                            else
+                                server.announce("[MAL]", "Failed to get vehicle group.", peer_id)
+                            end
+                        else
+                            server.announce("[MAL]", "Failed to get your position.", peer_id)
+                        end
+                    else
+                        server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+                    end
+                elseif action == "g" or action == "goto" then
+                    local vehicle_ids, is_success = server.getVehicleGroup(target_id)
+                    if is_success and #vehicle_ids > 0 then
+                        local vehicle_id = vehicle_ids[1]
+                        local vehicle_pos, is_success = server.getVehiclePos(vehicle_id)
+                        if is_success then
+                            server.setPlayerPos(peer_id, vehicle_pos)
+                            server.announce("[MAL]", "You have been teleported to vehicle group " .. target_id .. ".", peer_id)
+                        else
+                            server.announce("[MAL]", "Failed to get vehicle position.", peer_id)
+                        end
+                    else
+                        server.announce("[MAL]", "Failed to get vehicle group.", peer_id)
+                    end
+                else
+                    server.announce("[MAL]", "Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
+                end
+            else
+                server.announce("[MAL]", "Invalid target type. Use 'p' (player) or 'v' (vehicle).", peer_id)
+            end
+        else
+            server.announce("[MAL]", "Usage: ?tp <p|v> <b|g> <id>", peer_id)
+        end
+        elseif command == "?flip" then
+        if args[1] then
+            local vehicle_id = tonumber(args[1])
+            if vehicle_id then
+                local vehicle_pos, is_success = server.getVehiclePos(vehicle_id)
+                if is_success then
+                    server.setVehiclePos(vehicle_id, vehicle_pos)
+                    server.announce("[MAL]", "Vehicle " .. vehicle_id .. " has been flipped.", peer_id)
+                else
+                    server.announce("[MAL]", "Failed to get vehicle position.", peer_id)
+                end
+            else
+                server.announce("[MAL]", "Invalid vehicle ID.", peer_id)
+            end
+        else
+            server.announce("[MAL]", "Usage: ?flip <vehicle_id>", peer_id)
+        end
     elseif command == "?mintps" then
         if is_admin then
             local TPS_THRESHOLD = tonumber(args[1])
@@ -1067,6 +1162,18 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. TPS_THRESHOLD .. ".", -1)
             if debug_mode then
                 server.announce("[DEBUG]", "Admin " .. peer_id .. " set emergency cleanup TPS threshold to " .. TPS_THRESHOLD .. ".", -1)
+            end
+        else
+            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+        end
+        elseif command == "?despawndelay" then
+        if is_admin then
+            local new_delay = tonumber(args[1])
+            if new_delay and new_delay > 0 then
+                DISCONNECT_DESPAWN_DELAY = new_delay
+                server.announce("[MAL]", "Despawn delay set to " .. new_delay .. " seconds.", peer_id)
+            else
+                server.announce("[MAL]", "Invalid delay value.", peer_id)
             end
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
