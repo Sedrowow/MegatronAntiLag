@@ -1509,26 +1509,7 @@ function onTick(game_ticks)
         end
 
         -- Update PVP status effects (healing and revival)
-        for peer_id, is_pvp in pairs(player_pvp) do
-            if not is_pvp then -- If PVP is disabled
-                -- Get player's character ID
-                local object_id, is_success = server.getPlayerCharacterID(peer_id)
-                if is_success then
-                    -- Get character data
-                    local char_data = server.getObjectData(object_id)
-                    if char_data then
-                        -- Heal if damaged
-                        if char_data.hp < 100 then
-                            server.setCharacterData(object_id, 100, true, false)
-                        end
-                        -- Revive if dead
-                        if char_data.dead or char_data.incapacitated then
-                            server.reviveCharacter(object_id)
-                        end
-                    end
-                end
-            end
-        end
+        updatePVPEffects()
 
         -- Other game logic...
     else
@@ -1538,7 +1519,30 @@ function onTick(game_ticks)
         end
     end
 end
-
+function updatePVPEffects() --Made by: Sedrowow
+    -- Update PVP status effects (healing and revival)
+    for _, playerdata in pairs(playerlist) do
+        local is_pvp = getPlayerdata("pvp",true,playerdata.id)
+        if not is_pvp then -- If PVP is disabled
+            -- Get player's character ID
+            local object_id, is_success = server.getPlayerCharacterID(playerdata.id)
+            if is_success then
+                -- Get character data
+                local char_data = server.getObjectData(object_id)
+                if char_data then
+                    -- Revive if dead or incapacitated
+                    if char_data.dead or char_data.incapacitated then
+                        server.reviveCharacter(object_id)
+                    end
+                    -- Heal if damaged
+                    if char_data.hp < 100 then
+                        server.setCharacterData(object_id, 100, true, false)
+                    end
+                end
+            end
+        end
+    end
+end
 -- Add this function after other helper functions
 function isPlayerGroupOwner(peer_id, group_id)
     -- If peer_id is admin, they can control any group
