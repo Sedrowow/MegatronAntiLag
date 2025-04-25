@@ -234,7 +234,7 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
         		function(commands) return true end, 
         		function(commands) return help end
         		)
-			announce(help, peer_id)
+			server.announce("[VOTE]",help, user_peer_id)
         	end
 	end
 	if is_admin then	
