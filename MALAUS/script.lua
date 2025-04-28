@@ -1,3 +1,4 @@
+---@diagnostic disable: lowercase-global
 -- Define the maximum allowable lag cost per player
 local PLAYER_LAG_COST_LIMIT = 8000  -- Adjust this value as needed
 local PLAYER_LAG_COST_LIMIT_WS = PLAYER_LAG_COST_LIMIT  -- Lag cost limit for workshop vehicles not authored by the player
@@ -91,7 +92,7 @@ function updateVehicleLoading()
         if is_success then
             if vehicle_data["simulating"] then
                 if debug_mode then
-                    server.announce("[DEBUG]", "Vehicle is now simulating: ID=" .. vehicle_id)
+                    notify("[DEBUG]", "Vehicle is now simulating: ID=" .. vehicle_id)
                 end
 
                 -- Vehicle is loaded; calculate lag cost
@@ -118,7 +119,7 @@ function updateVehicleLoading()
             -- Vehicle no longer exists; remove from loading list
             vehicle_loading[vehicle_id] = nil
             if debug_mode then
-                server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " not found. Removed from loading list.", -1)
+                notify("[DEBUG]", "Vehicle " .. vehicle_id .. " not found. Removed from loading list.", -1)
             end
         end
     end
@@ -130,14 +131,14 @@ function areAllGroupVehiclesSimulating(group_id)
     local peer_id = group_peer_mapping[group_id]
     if not peer_id then
         if debug_mode then
-            server.announce("[DEBUG]", "Group ID " .. group_id .. " not found in group_peer_mapping.", -1)
+            notify("[DEBUG]", "Group ID " .. group_id .. " not found in group_peer_mapping.", -1)
         end
         return false
     end
 
     if not player_vehicle_groups[peer_id] then
         if debug_mode then
-            server.announce("[DEBUG]", "No vehicle groups found for peer ID " .. peer_id, -1)
+            notify("[DEBUG]", "No vehicle groups found for peer ID " .. peer_id, -1)
         end
         return false
     end
@@ -145,7 +146,7 @@ function areAllGroupVehiclesSimulating(group_id)
     local vehicles = player_vehicle_groups[peer_id][group_id]
     if not vehicles then
         if debug_mode then
-            server.announce("[DEBUG]", "Group ID " .. group_id .. " not found under peer ID " .. peer_id .. " in player_vehicle_groups.", -1)
+            notify("[DEBUG]", "Group ID " .. group_id .. " not found under peer ID " .. peer_id .. " in player_vehicle_groups.", -1)
         end
         return false
     end
@@ -158,102 +159,9 @@ function areAllGroupVehiclesSimulating(group_id)
     end
 
     if debug_mode then
-        server.announce("[DEBUG]", "All vehicles in group " .. group_id .. " are now simulating.", -1)
+        notify("[DEBUG]", "All vehicles in group " .. group_id .. " are now simulating.", -1)
     end
     return true
-end
-
--- Function to announce the group spawn
-function announceGroupSpawn(group_id, peer_id)
-    -- If peer_id is 0, it's the server or an addon; do not announce
-    if peer_id < 0 then
-        if debug_mode then
-            server.announce("[DEBUG]", "Group " .. group_id .. " spawned by server/addon (peer_id 0). Not announcing.", -1)
-        end
-        return
-    end
-    local vehicles = player_vehicle_groups[peer_id][group_id]
-    if not vehicles then
-        if debug_mode then
-            server.announce("[DEBUG]", "No vehicles found for group " .. group_id .. " for announcement.", -1)
-        end
-        return
-    end
-
-    local player_name = server.getPlayerName(peer_id)
-    local total_lag_cost = 0
-    local vehicle_names_set = {}
-    local vehicle_authors_set = {}
-    local is_ws_vehicle = false
-
-    for _, vehicle_id in ipairs(vehicles) do
-        local vehicle_info = vehicle_lag_costs[vehicle_id]
-        if vehicle_info then
-            total_lag_cost = total_lag_cost + vehicle_info.lag_cost
-            if vehicle_info.is_ws then
-                is_ws_vehicle = true
-            end
-
-            -- Collect vehicle names
-            local vehicle_name = vehicle_info.vehicle_name or "no name"
-            vehicle_names_set[vehicle_name] = true
-
-            -- Collect authors
-            for _, author_info in ipairs(vehicle_info.vehicle_authors) do
-                local author_name = author_info.name or "Unknown"
-                vehicle_authors_set[author_name] = true
-            end
-        else
-            if debug_mode then
-                server.announce("[DEBUG]", "Vehicle info not found for vehicle " .. vehicle_id .. " in group " .. group_id, -1)
-            end
-        end
-    end
-
-    -- Convert vehicle names set to a comma-separated string
-    local vehicle_names_str = ""
-    for name, _ in pairs(vehicle_names_set) do
-        if vehicle_names_str == "" then
-            vehicle_names_str = name
-        else
-            vehicle_names_str = vehicle_names_str .. ", " .. name
-        end
-    end
-
-    -- Convert authors set to a comma-separated string
-    local authors_str = ""
-    if next(vehicle_authors_set) == nil then
-        authors_str = "self"
-    else
-        local authors = {}
-        for author_name, _ in pairs(vehicle_authors_set) do
-            table.insert(authors, author_name)
-        end
-        authors_str = table.concat(authors, ", ")
-    end
-
-    -- Announce vehicle group spawn information
-    local message = "Vehicle Group Spawned:\n"
-    message = message .. "Player: " .. player_name .. "\n"
-    message = message .. "Vehicle Names: " .. vehicle_names_str .. "\n"
-    message = message .. "Authors: " .. authors_str .. "\n"
-    message = message .. "Group ID: " .. group_id .. "\n"
-    message = message .. "Total Lag Cost: " .. total_lag_cost
-
-    server.notify(-1,"[MAL]", message, 4)
-
-    -- Determine lag cost limit based on whether it's a workshop vehicle
-    local lag_cost_limit = PLAYER_LAG_COST_LIMIT
-    if is_ws_vehicle then
-        lag_cost_limit = PLAYER_LAG_COST_LIMIT_WS
-    end
-
-    -- Check if the player's lag cost exceeds the limit
-    if player_lag_costs[peer_id] > lag_cost_limit then
-        -- Despawn the player's vehicles
-        despawnPlayerVehicles(peer_id)
-        server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
-    end
 end
 
 -- Function to measure the TPS impact of a vehicle group
@@ -265,7 +173,7 @@ function measureGroupTPSImpact(group_id)
     group_tps_impact[group_id] = {pre_tps = pre_tps, check_time = check_time}
 
     if debug_mode then
-        server.announce("[DEBUG]", "Measuring TPS impact for group " .. group_id .. ". Pre-TPS: " .. pre_tps)
+        notify("[DEBUG]", "Measuring TPS impact for group " .. group_id .. ". Pre-TPS: " .. pre_tps)
     end
 end
 
@@ -279,7 +187,7 @@ function updateGroupTPSImpact()
             local tps_drop = impact_info.pre_tps - post_tps
 
             if debug_mode then
-                server.announce("[DEBUG]", "TPS impact check for group " .. group_id .. ". Post-TPS: " .. post_tps .. ", TPS Drop: " .. tps_drop)
+                notify("[DEBUG]", "TPS impact check for group " .. group_id .. ". Post-TPS: " .. post_tps .. ", TPS Drop: " .. tps_drop)
             end
 
             if tps_drop >= 5 then  -- TPS dropped by 5 or more
@@ -287,7 +195,7 @@ function updateGroupTPSImpact()
                 despawnVehicleGroup(group_id)
                 -- Notify the owner
                 local peer_id = group_peer_mapping[group_id]
-                server.announce("[MAL]", "Your vehicle has been despawned due to high TPS impact.", peer_id)
+                notify("[MAL]", "Your vehicle has been despawned due to high TPS impact.", peer_id)
             end
 
             -- Clean up
@@ -301,7 +209,7 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     -- If peer_id is 0, it's the server or an addon; ignore this vehicle
     if peer_id < 0 then
         if debug_mode then
-            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Skipping lag cost calculation.", -1)
+            notify("[DEBUG]", "Vehicle " .. vehicle_id .. " spawned by server/addon (peer_id 0). Skipping lag cost calculation.", -1)
         end
         return
     end
@@ -309,7 +217,7 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     local vehicle_data, is_success = server.getVehicleData(vehicle_id)
     if not is_success then
         if debug_mode then
-            server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " does not exist. Skipping lag cost calculation.", -1)
+            notify("[DEBUG]", "Vehicle " .. vehicle_id .. " does not exist. Skipping lag cost calculation.", -1)
         end
         return
     end
@@ -318,7 +226,7 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     local vehicle_components, is_success = server.getVehicleComponents(vehicle_id)
     if not is_success then
         if debug_mode then
-            server.announce("[DEBUG]", "Failed to get components for vehicle " .. vehicle_id .. ". Skipping lag cost calculation.", -1)
+            notify("[DEBUG]", "Failed to get components for vehicle " .. vehicle_id .. ". Skipping lag cost calculation.", -1)
         end
         return
     end
@@ -385,8 +293,8 @@ function calculateVehicleLagCost(vehicle_id, peer_id, group_id)
     player_lag_costs[peer_id] = player_lag_costs[peer_id] + total_lag_cost
 
     if debug_mode then
-        server.announce("[DEBUG]", "Calculated lag cost for vehicle " .. vehicle_id .. ": " .. total_lag_cost, -1)
-        server.announce("[DEBUG]", "Total lag cost for player " .. peer_id .. ": " .. player_lag_costs[peer_id], -1)
+        notify("[DEBUG]", "Calculated lag cost for vehicle " .. vehicle_id .. ": " .. total_lag_cost, -1)
+        notify("[DEBUG]", "Total lag cost for player " .. peer_id .. ": " .. player_lag_costs[peer_id], -1)
     end
 
     -- Removed per-vehicle announcement
@@ -398,7 +306,7 @@ function despawnPlayerVehicles(peer_id)
     -- If peer_id is 0, do not despawn server/addon vehicles
     if peer_id < 0 then
         if debug_mode then
-            server.announce("[DEBUG]", "Attempted to despawn vehicles for peer_id 0 (server/addon). Ignoring.", -1)
+            notify("[DEBUG]", "Attempted to despawn vehicles for peer_id 0 (server/addon). Ignoring.", -1)
         end
         return
     end
@@ -411,11 +319,11 @@ function despawnPlayerVehicles(peer_id)
         end
 
         -- Notify the player
-        server.announce("[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", peer_id)
+        notify("[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", peer_id)
     end
 
     if debug_mode then
-        server.announce("[DEBUG]", "Despawned all vehicles for player " .. peer_id)
+        notify("[DEBUG]", "Despawned all vehicles for player " .. peer_id)
     end
 end
 
@@ -424,7 +332,7 @@ function despawnVehicleGroup(group_id)
     local peer_id = group_peer_mapping[group_id]
     if not peer_id then
         if debug_mode then
-            server.announce("[DEBUG]", "Group " .. group_id .. " has no owner. Skipping despawn.", -1)
+            notify("[DEBUG]", "Group " .. group_id .. " has no owner. Skipping despawn.", -1)
         end
         return
     end
@@ -461,7 +369,7 @@ function despawnVehicleGroup(group_id)
     server.notify(peer_id, "[MAL]", "Your vehicle group " .. group_id .. " has been despawned.", 2)
 
     if debug_mode then
-        server.announce("[DEBUG]", "Vehicle group " .. group_id .. " despawned. Updated lag cost for player " .. peer_id, -1)
+        notify("[DEBUG]", "Vehicle group " .. group_id .. " despawned. Updated lag cost for player " .. peer_id, -1)
     end
 end
 
@@ -470,7 +378,7 @@ end
 function despawnPlayerVehicles(peer_id)
     if not player_vehicle_groups[peer_id] then
         if debug_mode then
-            server.announce("[DEBUG]", "No vehicles found for player " .. peer_id .. " to despawn.", -1)
+            notify("[DEBUG]", "No vehicles found for player " .. peer_id .. " to despawn.", -1)
         end
         return
     end
@@ -484,7 +392,7 @@ function despawnPlayerVehicles(peer_id)
     player_lag_costs[peer_id] = nil
 
     if debug_mode then
-        server.announce("[DEBUG]", "All vehicles despawned for player " .. peer_id, -1)
+        notify("[DEBUG]", "All vehicles despawned for player " .. peer_id, -1)
     end
 end
 
@@ -524,7 +432,7 @@ function onVehicleDespawn(vehicle_id, peer_id)
     end
 
     if debug_mode then
-        server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned. Lag cost updated.", -1)
+        notify("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned. Lag cost updated.", -1)
     end
 end
 
@@ -550,7 +458,7 @@ function handleTPSCountdown()
             tps_warning_issued = false
 
             if debug_mode then
-                server.announce("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.", -1)
+                notify("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.", -1)
             end
         end
     end
@@ -571,7 +479,7 @@ function handleEmergencyCleanup()
             server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
 
             if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.", -1)
+                notify("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.", -1)
             end
         else
             -- Countdown has finished
@@ -581,7 +489,7 @@ function handleEmergencyCleanup()
             server.cleanVehicles()
             server.notify(-1, "[MAL]", "Emergency cleanup executed due to very low TPS.", 1)
             if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup executed.", -1)
+                notify("[DEBUG]", "Emergency cleanup executed.", -1)
             end
             emergency_cleanup_countdown = nil
         end
@@ -600,7 +508,7 @@ function despawnHighestLagVehicle()
     if current_time - last_despawn_time < 2000 then
         -- Not enough time has passed; skip despawning
         if debug_mode then
-            server.announce("[DEBUG]", "Despawn cooldown active. Skipping despawn.", -1)
+            notify("[DEBUG]", "Despawn cooldown active. Skipping despawn.", -1)
         end
         return
     end
@@ -628,11 +536,11 @@ function despawnHighestLagVehicle()
         server.notify(peer_id, "[MAL]", "Your vehicle has been despawned due to high server load.", 2)  -- Notification type 2: failed_mission
 
         if debug_mode then
-            server.announce("[DEBUG]", "Despawning vehicle with highest lag cost: Vehicle ID=" .. vehicle_to_despawn, -1)
+            notify("[DEBUG]", "Despawning vehicle with highest lag cost: Vehicle ID=" .. vehicle_to_despawn, -1)
         end
     else
         if debug_mode then
-            server.announce("[DEBUG]", "No vehicles to despawn.", -1)
+            notify("[DEBUG]", "No vehicles to despawn.", -1)
         end
     end
 end
@@ -665,7 +573,7 @@ function showPlayerLagCost(target_peer_id, requesting_peer_id)
         message = message .. "\nNo vehicle groups."
     end
 
-    server.announce("[MAL]", message, requesting_peer_id)
+    notify("[MAL]", message, requesting_peer_id)
 end
 
 -- Function to clear laggy vehicles
@@ -682,7 +590,7 @@ function clearLag(lag_threshold)
             local peer_id = group_peer_mapping[group_id]
             server.notify(peer_id, "[MAL]", "Your vehicle has been despawned due to exceeding lag cost threshold.", 2)
             if debug_mode then
-                server.announce("[DEBUG]", "Despawning vehicle group " .. group_id .. " due to total lag cost " .. total_lag_cost .. " exceeding threshold " .. lag_threshold)
+                notify("[DEBUG]", "Despawning vehicle group " .. group_id .. " due to total lag cost " .. total_lag_cost .. " exceeding threshold " .. lag_threshold)
             end
         end
     end
@@ -699,7 +607,7 @@ function repairGroup(peer_id, group_id, is_admin)
             end
             server.notify(peer_id, "[MAL]", "Repaired vehicles in group " .. group_id .. ".", 4)  -- Notification type 4: complete_mission
             if debug_mode then
-                server.announce("[DEBUG]", "Player " .. peer_id .. " repaired group " .. group_id)
+                notify("[DEBUG]", "Player " .. peer_id .. " repaired group " .. group_id)
             end
         else
             server.notify(peer_id, "[MAL]", "Failed to repair vehicles. Group not found.", 2)
@@ -723,7 +631,7 @@ function repairPlayerVehicles(peer_id)
         end
         server.notify(peer_id, "[MAL]", "Repaired all your vehicles.", 4)
         if debug_mode then
-            server.announce("[DEBUG]", "Player " .. peer_id .. " repaired all their vehicles.")
+            notify("[DEBUG]", "Player " .. peer_id .. " repaired all their vehicles.")
         end
     else
         server.notify(peer_id, "[MAL]", "You have no vehicles to repair.", 2)
@@ -740,7 +648,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         if is_admin then
             debug_mode = not debug_mode
             local state = debug_mode and "enabled" or "disabled"
-            server.announce("[MAL]", "Debug mode " .. state .. ".", peer_id)
+            notify("[MAL]", "Debug mode " .. state .. ".", peer_id)
         end
     elseif command == "?mallag" or command == "?mallist" then
         if args[1] then
@@ -749,10 +657,10 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 if target_peer_id then
                     showPlayerLagCost(target_peer_id, peer_id)
                 else
-                    server.announce("[MAL]", "Invalid peer_id.", peer_id)
+                    notify("[MAL]", "Invalid peer_id.", peer_id)
                 end
             else
-                server.announce("[MAL]", "You do not have permission to view other players' lag cost.", peer_id)
+                notify("[MAL]", "You do not have permission to view other players' lag cost.", peer_id)
             end
         else
             showPlayerLagCost(peer_id, peer_id)
@@ -761,12 +669,12 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     elseif command == "?malcleanup" then
         if is_admin then
             server.cleanVehicles()
-            server.announce("[MAL]", "Cleanup has been issued by admin, sorry for any inconvenience caused.", -1)
+            notify("[MAL]", "Cleanup has been issued by admin, sorry for any inconvenience caused.", -1)
             if debug_mode then
-                server.announce("[DEBUG]", "Admin " .. peer_id .. " issued cleanup.", -1)
+                notify("[DEBUG]", "Admin " .. peer_id .. " issued cleanup.", -1)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            notify("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?malclearlag" then
@@ -776,12 +684,12 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 lag_threshold = PLAYER_LAG_COST_LIMIT / 2
             end
             clearLag(lag_threshold)
-            server.announce("[MAL]", "Cleared vehicles above lag cost " .. lag_threshold .. ".", -1)
+            notify("[MAL]", "Cleared vehicles above lag cost " .. lag_threshold .. ".", -1)
             if debug_mode then
-                server.announce("[DEBUG]", "Admin " .. peer_id .. " issued clearlag with threshold " .. lag_threshold .. ".", -1)
+                notify("[DEBUG]", "Admin " .. peer_id .. " issued clearlag with threshold " .. lag_threshold .. ".", -1)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            notify("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?malmaxlagcost" then
@@ -790,15 +698,15 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             if new_limit and new_limit >= 1000 and new_limit <= 50000 then
                 PLAYER_LAG_COST_LIMIT = new_limit
                 PLAYER_LAG_COST_LIMIT_WS = new_limit / 2  -- Reset WS limit to half of new limit
-                server.announce("[MAL]", "Set maximum lag cost to " .. new_limit .. ".", -1)
+                notify("[MAL]", "Set maximum lag cost to " .. new_limit .. ".", -1)
                 if debug_mode then
-                    server.announce("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT to " .. new_limit .. ".", -1)
+                    notify("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT to " .. new_limit .. ".", -1)
                 end
             else
-                server.announce("[MAL]", "Invalid value. Please enter a number between 1000 and 50000.", peer_id)
+                notify("[MAL]", "Invalid value. Please enter a number between 1000 and 50000.", peer_id)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            notify("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?malmaxlagcostws" then
@@ -806,15 +714,15 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             local new_limit = tonumber(args[1])
             if new_limit and new_limit >= 500 and new_limit <= 25000 then
                 PLAYER_LAG_COST_LIMIT_WS = new_limit
-                server.announce("[MAL]", "Set workshop vehicle lag cost limit to " .. new_limit .. ".", -1)
+                notify("[MAL]", "Set workshop vehicle lag cost limit to " .. new_limit .. ".", -1)
                 if debug_mode then
-                    server.announce("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT_WS to " .. new_limit .. ".", -1)
+                    notify("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT_WS to " .. new_limit .. ".", -1)
                 end
             else
-                server.announce("[MAL]", "Invalid value. Please enter a number between 500 and 25000.", peer_id)
+                notify("[MAL]", "Invalid value. Please enter a number between 500 and 25000.", peer_id)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            notify("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?malmintps" then
@@ -824,12 +732,12 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 tps_threshold = 35
             end
             TPS_THRESHOLD = tps_threshold
-            server.announce("[MAL]", "Set TPS threshold to " .. tps_threshold .. ".", -1)
+            notify("[MAL]", "Set TPS threshold to " .. tps_threshold .. ".", -1)
             if debug_mode then
-                server.announce("[DEBUG]", "Admin " .. peer_id .. " set TPS threshold to " .. tps_threshold .. ".", -1)
+                notify("[DEBUG]", "Admin " .. peer_id .. " set TPS threshold to " .. tps_threshold .. ".", -1)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            notify("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?malhelp" then
@@ -846,7 +754,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?malmaxlagcostws [value] - Set workshop vehicle lag cost limit.\n"
             help_message = help_message .. "?malmintps [tps_value] - Set TPS threshold.\n"
         end
-        server.announce("[MAL]", help_message, peer_id)
+        notify("[MAL]", help_message, peer_id)
     end
 end
 
@@ -876,22 +784,8 @@ function isPlayerGroupOwner(peer_id, group_id)
     end
     return false
 end
-
--- Add to onTick after other update functions
-function updateDisconnectedPlayers()
-    local current_time = server.getTimeMillisec()
-    
-    for steam_id, data in pairs(disconnected_players) do
-        if current_time >= data.despawn_time then
-            -- Time's up - despawn their vehicles
-            if player_vehicle_groups[data.peer_id] then
-                despawnPlayerVehicles(data.peer_id)
-                if debug_mode then
-                    server.announce("[DEBUG]", "Despawned vehicles for disconnected player (Steam ID: " .. steam_id .. ")", -1)
-                end
-            end
-            -- Remove from tracking
-            disconnected_players[steam_id] = nil
-        end
-    end
+-- Function to notify players
+-- This function sends a notification to a specific player
+function notify(name, message, peer_id)
+    server.notify(peer_id, "[MAL] " .. name, message, 5)
 end
