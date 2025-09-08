@@ -1,0 +1,11 @@
+# Ignore generated or local mission/economy folders
+lgcargo/
+better_mission_locations/
+personalmoney/
+
+# Common ignores
+*.bak
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db

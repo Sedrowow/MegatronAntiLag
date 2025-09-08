@@ -130,18 +130,101 @@ function onTick(game_ticks)
 	end
 end
 
+-- Automatic periodic cleanup removed per user request. ?delobjs remains as an admin-invoked command only.
+
 function cNameStr(id)
 	return id..": "..server.getPlayerName(id)
 end
 
 function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command, arg1, arg2)
 	if command=="?delobjs" and is_admin then
-		count=0
-		for i=1,99999 do
-			is_success = server.despawnObject(i, true)
-			if is_success then count=count+1 end
+		-- Usage: ?delobjs [all]
+		-- By default this will despawn most objects but will skip characters and creatures, fire and drill_rods.
+		-- If the optional argument 'all' is provided, fires and drill_rods will also be removed.
+		local include_fires_and_drill = false
+		if arg1 and arg1:lower() == "all" then include_fires_and_drill = true end
+
+		local protected_types = {
+			-- object type ids for characters/creatures are handled by server.getObjectData (type field)
+		}
+
+		local count = 0
+		-- We will iterate over a reasonable object id range and attempt to query each object
+		for i = 1, 99999 do
+			local data, ok = server.getObjectData(i)
+			if ok and data then
+				local obj_type = data.type -- integer type: 0 none, 1 character, 72 creature, etc per intellisense
+
+				-- Protect characters and creatures always
+				if obj_type == 1 or obj_type == 72 then
+					goto continue_del
+				end
+
+				-- Protect fires and drill_rods by default, remove only if 'all' passed
+				-- Fire type in object list may be represented differently; we'll also check server.getFireData
+				if not include_fires_and_drill then
+					-- Try to detect fire by checking if getFireData returns something
+					local is_fire = false
+					local okf, fdata = pcall(function() return server.getFireData(i) end)
+					if okf and fdata ~= nil then
+						is_fire = true
+					end
+					-- Detect drill rod by equipment/object id heuristics: object descriptors sometimes include name/type - fallback: skip objects with equipment field or tag 'drill_rod'
+					local is_drill = false
+					if data.tags_full and string.find(data.tags_full:lower(), "drill") then is_drill = true end
+
+					if is_fire or is_drill then goto continue_del end
+				end
+
+				-- Special-case items that we usually want to keep unless excessive: flares, glowsticks, grenades, c4
+				-- We'll count instances per sub-type and only despawn them automatically if there are more than 10 of that sub-type
+				local keep_special = { ["flare"] = true, ["glowstick"] = true, ["grenade"] = true, ["c4"] = true }
+				-- Attempt to examine tooltip or tags to classify special items
+				local lowername = (data.display_name or ""):lower()
+				local is_special = false
+				local special_key = nil
+				for k,_ in pairs(keep_special) do
+					if string.find(lowername, k) then is_special = true; special_key = k; break end
+				end
+
+				if is_special then
+					-- Count existing instances to decide
+					-- We'll gather counts lazily into a cache located in this script's env
+					_G._delobjs_counts = _G._delobjs_counts or {}
+					_G._delobjs_counts[special_key] = (_G._delobjs_counts[special_key] or 0) + 1
+					-- Don't despawn now; we'll run a second pass below after counting
+					goto continue_del
+				end
+
+				-- If we reached here, attempt to despawn the object
+				local okdes = server.despawnObject(i, true)
+				if okdes then count = count + 1 end
+			end
+			::continue_del::
 		end
-		server.notify(user_id, "server-command", "removed "..tostring(count).." items/objects", 7)
+
+		-- Handle special items: if any category exceeded 10, remove extras (despawn all of that type)
+		if _G._delobjs_counts then
+			for key, cnt in pairs(_G._delobjs_counts) do
+				if cnt > 10 then
+					-- second pass: despawn objects matching this special_key
+					for i = 1, 99999 do
+						local data, ok = server.getObjectData(i)
+						if ok and data then
+							local lowername = (data.display_name or ""):lower()
+							if string.find(lowername, key) then
+								local okdes = server.despawnObject(i, true)
+								if okdes then count = count + 1 end
+							end
+						end
+					end
+				end
+			end
+			-- reset counts cache
+			_G._delobjs_counts = nil
+		end
+
+		server.notify(user_peer_id, "server-command", "removed "..tostring(count).." items/objects", 7)
 	end
 	if command == "?vote" then
 		

@@ -1,5 +1,5 @@
 -- Define the maximum allowable lag cost per player
-local PLAYER_LAG_COST_LIMIT = 8000  -- Adjust this value as needed
+local PLAYER_LAG_COST_LIMIT = 15000  -- Adjust this value as needed
 local PLAYER_LAG_COST_LIMIT_WS = PLAYER_LAG_COST_LIMIT  -- Lag cost limit for workshop vehicles not authored by the player
 
 -- Component lag costs for each type
@@ -58,7 +58,34 @@ local disconnected_players = {} -- [steam_id] = {despawn_time = number, peer_id 
 local DISCONNECT_DESPAWN_DELAY = 120 -- 2 minutes in seconds
 
 local player_pvp = {}        -- [peer_id] = is_pvp_enabled
-local player_pvp_popups = {} -- [peer_id] = ui_id
+local player_pve = {}        -- [peer_id] = is_pve_enabled
+local player_pvp_popups = {} -- reserved but we'll use a single global popup id
+local GLOBAL_PVPVE_POPUP_ID = 9999
+
+-- Server display configuration (customize these)
+local SERVER_NAME = "My Server"    -- First line in HUD
+local DISCORD_INVITE = "invite-code" -- Third line in HUD (after 'discord:')
+
+-- Per-player popup ID bases
+local HUD_POPUP_BASE = 200
+local ALT_POPUP_BASE = 300
+local SPD_POPUP_BASE = 400
+
+-- Per-player speed unit preference: 1 = km/h (default), 2 = m/s, 3 = knots
+local player_speed_unit = {} -- [peer_id] = 1|2|3
+
+-- Per-player position history for speed calculation
+local player_pos_history = {} -- [peer_id] = { {t=ms, x, z}, ... }
+
+-- Track spawn order of groups per player: player_group_order[peer_id] = { group_id1, group_id2, ... }
+local player_group_order = {}
+
+-- Map and speed tracking
+local vehicle_pos_history = {} -- [vehicle_id] = { {t=ms, x, z}, ... }
+local VEHICLE_MAP_UI_BASE = 10000
+local PLAYER_MAP_UI_BASE = 20000
+local last_map_update = 0
+
 
 function onCreate(is_world_create)
     if not is_world_create then
@@ -70,7 +97,7 @@ function onCreate(is_world_create)
 
         -- Display a popup screen in the center for all players
         local message = "Server scripts have been reloaded. Resuming operations in " .. reload_countdown_time .. " seconds."
-        server.setPopupScreen(-1, 0, "[MAL] Script Reloaded", true, message, 0.5, 0.5)  -- Position (0.5, 0.5) centers the popup
+        server.setPopupScreen(-1, 0, "[MAL] Script Reloaded", true, message, 0.1, 0.1)  -- Position (0.1, 0.1) centers the popup
 
         if debug_mode then
             server.announce("[DEBUG]", "Scripts have been reloaded via onCreate. Starting countdown.", -1)
@@ -176,12 +203,23 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
     -- Apply PVP state if peer is tracked
     if peer_id > 0 then  -- Only for actual players
         local is_pvp = player_pvp[peer_id]
-        if is_pvp ~= nil then
-            server.setVehicleInvulnerable(vehicle_id, not is_pvp)
-            if debug_mode then
-                server.announce("[DEBUG]", "Applied PVP state " .. tostring(is_pvp) .. " to vehicle " .. vehicle_id, -1)
-            end
+        local is_pve = player_pve[peer_id]
+        if is_pvp == nil then is_pvp = false end
+        if is_pve == nil then is_pve = false end
+        -- Vehicles should be vulnerable if either PvP or PvE mode is enabled
+        local invulnerable = not (is_pvp or is_pve)
+        server.setVehicleInvulnerable(vehicle_id, invulnerable)
+        if debug_mode then
+            server.announce("[DEBUG]", "Applied PVP/PVE state (pvp=" .. tostring(is_pvp) .. ", pve=" .. tostring(is_pve) .. ") to vehicle " .. vehicle_id, -1)
         end
+        -- Track group spawn order per player
+        if not player_group_order[peer_id] then player_group_order[peer_id] = {} end
+        local found = false
+        for _, gid in ipairs(player_group_order[peer_id]) do
+            if gid == group_id then found = true; break end
+        end
+        if not found then table.insert(player_group_order[peer_id], group_id) end
+        updateGlobalPVPVEPopup()
     end
 end
 
@@ -319,8 +357,13 @@ function announceGroupSpawn(group_id, peer_id)
 
     for _, vehicle_id in ipairs(vehicles) do
         local vehicle_info = vehicle_lag_costs[vehicle_id]
+        if not vehicle_info then
+            -- If lag info missing, attempt to calculate it now
+            calculateVehicleLagCost(vehicle_id, peer_id, group_id)
+            vehicle_info = vehicle_lag_costs[vehicle_id]
+        end
         if vehicle_info then
-            total_lag_cost = total_lag_cost + vehicle_info.lag_cost
+            total_lag_cost = total_lag_cost + (vehicle_info.lag_cost or 0)
             if vehicle_info.is_ws then
                 is_ws_vehicle = true
             end
@@ -330,13 +373,13 @@ function announceGroupSpawn(group_id, peer_id)
             vehicle_names_set[vehicle_name] = true
 
             -- Collect authors
-            for _, author_info in ipairs(vehicle_info.vehicle_authors) do
+            for _, author_info in ipairs(vehicle_info.vehicle_authors or {}) do
                 local author_name = author_info.name or "Unknown"
                 vehicle_authors_set[author_name] = true
             end
         else
             if debug_mode then
-                server.announce("[DEBUG]", "Vehicle info not found for vehicle " .. vehicle_id .. " in group " .. group_id, -1)
+                server.announce("[DEBUG]", "Vehicle info not found for vehicle " .. vehicle_id .. " in group " .. group_id .. " after calculation attempt", -1)
             end
         end
     end
@@ -380,10 +423,10 @@ function announceGroupSpawn(group_id, peer_id)
     end
 
     -- Check if the player's lag cost exceeds the limit
-    if player_lag_costs[peer_id] > lag_cost_limit then
-        -- Despawn the player's vehicles
-        despawnPlayerVehicles(peer_id)
-        server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
+    if player_lag_costs[peer_id] and player_lag_costs[peer_id] > lag_cost_limit then
+        -- Despawn only this newly spawned group (group_id)
+        despawnVehicleGroup(group_id)
+        server.notify(peer_id, "[MAL]", "Your vehicle group " .. group_id .. " has been despawned due to exceeding the lag cost limit.", 2)
     end
 end
 
@@ -587,6 +630,17 @@ function despawnVehicleGroup(group_id)
     -- Remove group from group_peer_mapping
     group_peer_mapping[group_id] = nil
 
+    -- Remove group from player's spawn order list if present
+    if peer_id and player_group_order[peer_id] then
+        for i, gid in ipairs(player_group_order[peer_id]) do
+            if gid == group_id then
+                table.remove(player_group_order[peer_id], i)
+                break
+            end
+        end
+        if #player_group_order[peer_id] == 0 then player_group_order[peer_id] = nil end
+    end
+
     -- Despawn the group
     server.despawnVehicleGroup(group_id, true)
     server.notify(peer_id, "[MAL]", "Your vehicle group " .. group_id .. " has been despawned.", 2)
@@ -623,8 +677,8 @@ end
 function onVehicleDespawn(vehicle_id, peer_id)
     local vehicle_info = vehicle_lag_costs[vehicle_id]
     if vehicle_info then
-        local owner_peer_id = vehicle_info.peer_id
-        local group_id = vehicle_info.group_id
+    local owner_peer_id = vehicle_info.peer_id
+    local group_id = vehicle_info.group_id
 
         -- Deduct lag cost from the player
         if player_lag_costs[owner_peer_id] then
@@ -652,11 +706,42 @@ function onVehicleDespawn(vehicle_id, peer_id)
                 group_peer_mapping[group_id] = nil
             end
         end
+
+            -- Clean up spawn order list for the owner
+            if owner_peer_id and player_group_order[owner_peer_id] then
+                for i, gid in ipairs(player_group_order[owner_peer_id]) do
+                    if gid == group_id then
+                        table.remove(player_group_order[owner_peer_id], i)
+                        break
+                    end
+                end
+                if #player_group_order[owner_peer_id] == 0 then player_group_order[owner_peer_id] = nil end
+            end
+
+            -- Remove any player or vehicle map UI related to this group
+            -- vehicle map objects removed in onVehicleDespawn above; remove player map UI if no more vehicles
+            local remaining = 0
+            if owner_peer_id and player_vehicle_groups[owner_peer_id] then
+                for _, vs in pairs(player_vehicle_groups[owner_peer_id]) do remaining = remaining + (#vs or 0) end
+            end
+            if remaining == 0 and owner_peer_id then
+                server.removeMapObject(-1, PLAYER_MAP_UI_BASE + owner_peer_id)
+                -- Remove HUD and ALT/SPD popups when player has no vehicles
+                server.removePopup(owner_peer_id, HUD_POPUP_BASE + owner_peer_id)
+                server.removePopup(owner_peer_id, ALT_POPUP_BASE + owner_peer_id)
+                server.removePopup(owner_peer_id, SPD_POPUP_BASE + owner_peer_id)
+                player_pos_history[owner_peer_id] = nil
+            end
     end
 
     if debug_mode then
         server.announce("[DEBUG]", "Vehicle " .. vehicle_id .. " despawned. Lag cost updated.", -1)
     end
+
+    -- Remove vehicle map object if present
+    local ui_id = VEHICLE_MAP_UI_BASE + vehicle_id
+    server.removeMapObject(-1, ui_id)
+    vehicle_pos_history[vehicle_id] = nil
 end
 
 
@@ -686,109 +771,26 @@ function updateTPS(game_ticks)
         server.setPopupScreen(-1, 3, "TPS", true, "TPS: " .. tostring(TPS), 0.9, 0.7)
     end
 
-    -- Check if TPS is below threshold
-    if TPS < TPS_THRESHOLD then
-        if not tps_countdown then
-            tps_countdown = 8  -- Start 8 seconds countdown
-            tps_warning_issued = false
-            tps_countdown_start_time = now
-
-            if debug_mode then
-                server.announce("[DEBUG]", "TPS dropped below threshold. Starting countdown.", -1)
-            end
-        end
-    else
-        if tps_countdown then
-            -- Remove the TPS countdown popup if TPS recovers
-            server.removePopup(-1, 1)
-            if debug_mode then
-                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.", -1)
-            end
-        end
-        tps_countdown = nil
-        tps_warning_issued = false
-    end
-
-    -- Emergency cleanup check
-    if TPS < emergency_cleanup_tps then
-        if not emergency_cleanup_countdown then
-            emergency_cleanup_countdown = 2500  -- milliseconds
-            emergency_cleanup_start_time = now
-            -- Display the emergency cleanup popup
-            local message = "Emergency cleanup in 2 seconds due to very low TPS."
-            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
-
-            if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup initiated.", -1)
-            end
-        end
-    else
-        if emergency_cleanup_countdown then
-            -- Remove the emergency cleanup popup if TPS recovers
-            server.removePopup(-1, 2)
-        end
-        emergency_cleanup_countdown = nil
-    end
+    -- TPS-based despawn and emergency cleanup removed per configuration.
+    -- Keep TPS display only. No automatic despawns will occur because of TPS.
+    tps_countdown = nil
+    emergency_cleanup_countdown = nil
 end
 
 
 -- Function to handle TPS countdown and vehicle despawning
 function handleTPSCountdown()
-    if tps_countdown then
-        local tempo = server.getTimeMillisec()
-        local elapsed_time = (tempo - tps_countdown_start_time) / 1000  -- Convert to seconds
-        local remaining_time = math.ceil(tps_countdown - elapsed_time)
-
-        if remaining_time > 0 then
-            -- Update the popup screen with the remaining time
-            local message = "Server TPS is low!\nRemoving high-lag vehicles in " .. remaining_time .. " seconds."
-            server.setPopupScreen(-1, 1, "[MAL] Low TPS Warning", true, message, 0.5, 0.4)  -- Position slightly above center
-        else
-            -- Countdown has finished
-            -- Remove the popup screen
-            server.removePopup(-1, 1)
-            -- Despawn the vehicle with the highest lag cost
-            despawnHighestLagVehicle()
-            tps_countdown = nil
-            tps_warning_issued = false
-
-            if debug_mode then
-                server.announce("[DEBUG]", "Countdown finished. Despawning highest lag vehicle.", -1)
-            end
-        end
-    end
+    -- TPS countdown disabled: no automatic despawns due to low TPS in tailored script.
+    tps_countdown = nil
+    tps_warning_issued = false
 end
 
 
 
 -- Function to handle emergency cleanup countdown
 function handleEmergencyCleanup()
-    if emergency_cleanup_countdown then
-        local current_time = server.getTimeMillisec()
-        local elapsed_time = current_time - emergency_cleanup_start_time
-        local remaining_time = math.ceil((emergency_cleanup_countdown - elapsed_time) / 1000)
-
-        if remaining_time > 0 then
-            -- Update the popup screen with the remaining time
-            local message = "Emergency cleanup in " .. remaining_time .. " seconds due to very low TPS."
-            server.setPopupScreen(-1, 2, "[MAL] Emergency Cleanup", true, message, 0.5, 0.4)  -- Position slightly above center
-
-            if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup countdown: " .. remaining_time .. " seconds remaining.", -1)
-            end
-        else
-            -- Countdown has finished
-            -- Remove the popup screen
-            server.removePopup(-1, 2)
-            -- Time to perform emergency cleanup
-            server.cleanVehicles()
-            server.notify(-1, "[MAL]", "Emergency cleanup executed due to very low TPS.", 1)
-            if debug_mode then
-                server.announce("[DEBUG]", "Emergency cleanup executed.", -1)
-            end
-            emergency_cleanup_countdown = nil
-        end
-    end
+    -- Emergency cleanup disabled in tailored script.
+    emergency_cleanup_countdown = nil
 end
 
 
@@ -1268,40 +1270,79 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     elseif command == "?as" or command == "?antisteal" then
         togglePlayerAntisteal(peer_id)
         return
+    elseif command == "?unit" then
+        -- Usage: ?unit [1|2|3]
+        -- 1 = km/h (default), 2 = m/s, 3 = knots
+        local arg = args[1]
+        if not arg then
+            server.announce("[MAL]", "Speed units: 1 = km/h (default), 2 = m/s, 3 = knots. Use '?unit N' to set.", peer_id)
+            return
+        end
+        local choice = tonumber(arg)
+        if choice and (choice == 1 or choice == 2 or choice == 3) then
+            player_speed_unit[peer_id] = choice
+            server.announce("[MAL]", "Speed unit set to " .. (choice == 1 and "km/h" or (choice == 2 and "m/s" or "knots")) .. ".", peer_id)
+            -- Immediately update HUD for the player
+            updatePlayerHUD(peer_id)
+        else
+            server.announce("[MAL]", "Invalid unit. Choose 1 = km/h, 2 = m/s, 3 = knots.", peer_id)
+        end
+        return
     elseif command == "?c" then
-        local group_id = tonumber(args[1])
-        
-        if group_id then
-            -- Specific group despawn
-            local owner_peer_id = group_peer_mapping[group_id]
-            if owner_peer_id then
-                if is_admin or isPlayerGroupOwner(peer_id, group_id) then
-                    despawnVehicleGroup(group_id)
-                    server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " has been despawned.", 1)
-                    if debug_mode then
-                        server.announce("[DEBUG]", "Player " .. peer_id .. " despawned group " .. group_id)
+        local arg = args[1]
+        if arg then
+            local index = tonumber(arg)
+            if index and index >= 1 then
+                local order = player_group_order[peer_id]
+                if order and order[index] then
+                    local group_id = order[index]
+                    if isPlayerGroupOwner(peer_id, group_id) or is_admin then
+                        despawnVehicleGroup(group_id)
+                        server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " (index "..index..") has been despawned.", 1)
+                    else
+                        server.notify(peer_id, "[MAL]", "You don't have permission to despawn this vehicle group.", 2)
                     end
+                else
+                    server.notify(peer_id, "[MAL]", "No spawned vehicle at index " .. tostring(index) .. ".", 2)
+                end
+            else
+                server.notify(peer_id, "[MAL]", "Invalid index. Use ?c or ?c <index>.", 2)
+            end
+        else
+            -- No argument: remove the latest spawned group for the player
+            local order = player_group_order[peer_id]
+            if order and #order > 0 then
+                local latest_group = order[#order]
+                if isPlayerGroupOwner(peer_id, latest_group) or is_admin then
+                    despawnVehicleGroup(latest_group)
+                    server.notify(peer_id, "[MAL]", "Latest vehicle group " .. latest_group .. " has been despawned.", 1)
                 else
                     server.notify(peer_id, "[MAL]", "You don't have permission to despawn this vehicle group.", 2)
                 end
             else
-                server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " not found.", 2)
+                server.notify(peer_id, "[MAL]", "You have no spawned vehicle groups.", 2)
             end
+        end
+
+    elseif command == "?d" then
+        -- Despawn group by ID if owner or admin
+        local group_id = tonumber(args[1])
+        if not group_id then
+            server.notify(peer_id, "[MAL]", "Usage: ?d <group_id>", 2)
         else
-            -- Despawn all vehicles owned by the player
-            local groups = player_vehicle_groups[peer_id]
-            if groups and next(groups) then
-                despawnPlayerVehicles(peer_id)
-                server.notify(peer_id, "[MAL]", "All your vehicles have been despawned.", 1)
-                if debug_mode then
-                    server.announce("[DEBUG]", "Player " .. peer_id .. " despawned all their vehicles")
-                end
+            local owner = group_peer_mapping[group_id]
+            if owner and (is_admin or owner == peer_id) then
+                despawnVehicleGroup(group_id)
+                server.notify(peer_id, "[MAL]", "Vehicle group " .. group_id .. " has been despawned.", 1)
             else
-                server.notify(peer_id, "[MAL]", "You have no vehicles to despawn.", 2)
+                server.notify(peer_id, "[MAL]", "You do not have permission to despawn this vehicle group.", 2)
             end
         end
     elseif command == "?pvp" then
         togglePlayerPVP(peer_id)
+        return
+    elseif command == "?pve" then
+        togglePlayerPVE(peer_id)
         return
     end
 end
@@ -1468,8 +1509,12 @@ function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
     
     -- Initialize PVP state to false (disabled by default)
     player_pvp[peer_id] = false
+    player_pve[peer_id] = false
 
-    -- Apply invulnerability to all existing vehicles of this player (and ensure future vehicles will be set in onVehicleSpawn)
+    -- Initialize per-player speed unit preference to default (km/h)
+    player_speed_unit[peer_id] = 1
+
+    -- By default vehicles are invulnerable unless player enables PvP/PvE
     if player_vehicle_groups[peer_id] then
         for group_id, vehicles in pairs(player_vehicle_groups[peer_id]) do
             for _, vehicle_id in ipairs(vehicles) do
@@ -1485,6 +1530,7 @@ function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
             server.announce("[DEBUG]", "Cancelled disconnect timer for player " .. name .. " (Steam ID: " .. steam_id .. ")", -1)
         end
     end
+    updateGlobalPVPVEPopup()
 end
 
 -- Add to onPlayerLeave to clean up
@@ -1494,12 +1540,7 @@ function onPlayerLeave(steam_id, name, peer_id, is_admin, is_auth)
     
     -- Clean up PVP state
     player_pvp[peer_id] = nil
-    
-    -- Remove PVP popup if exists
-    if player_pvp_popups[peer_id] then
-        server.removePopup(-1, player_pvp_popups[peer_id])
-        player_pvp_popups[peer_id] = nil
-    end
+    player_pve[peer_id] = nil
     
     -- Start despawn timer for player's vehicles
     if peer_id >= 0 then -- Don't track server/addon vehicles
@@ -1511,6 +1552,15 @@ function onPlayerLeave(steam_id, name, peer_id, is_admin, is_auth)
             server.announce("[DEBUG]", "Started disconnect timer for player " .. name .. " (Steam ID: " .. steam_id .. ")", -1)
         end
     end
+    updateGlobalPVPVEPopup()
+    -- Remove per-player HUD and popups when leaving
+    server.removePopup(peer_id, HUD_POPUP_BASE + peer_id)
+    server.removePopup(peer_id, ALT_POPUP_BASE + peer_id)
+    server.removePopup(peer_id, SPD_POPUP_BASE + peer_id)
+    player_pos_history[peer_id] = nil
+
+    -- Clean up per-player unit preference
+    player_speed_unit[peer_id] = nil
 end
 
 -- onTick function
@@ -1541,12 +1591,7 @@ function onTick(game_ticks)
         -- Update disconnected players
         updateDisconnectedPlayers()
 
-        -- Update PVP popups for all players
-        for peer_id, _ in pairs(player_pvp) do
-            if player_pvp[peer_id] then
-                updatePlayerPVPPopup(peer_id)
-            end
-        end
+    -- Global PVP/PVE popup is handled by updateGlobalPVPVEPopup()
 
         -- Update PVP status effects (healing and revival) every 0.5s
         if not global_pvp_check_time or server.getTimeMillisec() - global_pvp_check_time >= 500 then
@@ -1569,6 +1614,32 @@ function onTick(game_ticks)
                     end
                 end
             end
+        end
+
+        -- Update per-player HUDs at most once per second
+        if not last_hud_update or server.getTimeMillisec() - last_hud_update >= 1000 then
+            last_hud_update = server.getTimeMillisec()
+            local players = server.getPlayers()
+            for _, p in pairs(players) do
+                    -- Record player pos history for speed calculations
+                    local pos, ok = server.getPlayerPos(p.id)
+                    if ok and pos then
+                        local x, y, z = matrix.position(pos)
+                        player_pos_history[p.id] = player_pos_history[p.id] or {}
+                        table.insert(player_pos_history[p.id], { t = server.getTimeMillisec(), x = x, z = z })
+                        -- Trim history older than 6 seconds
+                        local ph = player_pos_history[p.id]
+                        local cutoff = server.getTimeMillisec() - 6000
+                        while #ph > 0 and ph[1].t < cutoff do table.remove(ph, 1) end
+                    end
+                    updatePlayerHUD(p.id)
+            end
+        end
+
+        -- Update map objects (vehicles and players) at most once per second
+        if not last_map_update or server.getTimeMillisec() - last_map_update >= 1000 then
+            last_map_update = server.getTimeMillisec()
+            updateMapObjects()
         end
 
         -- Other game logic...
@@ -1645,7 +1716,11 @@ function togglePlayerPVP(peer_id)
     end
 
     -- Update PVP popup
-    updatePlayerPVPPopup(peer_id)
+    -- Ensure mutual exclusivity: remove from PVE if added to PVP
+    if new_state and player_pve[peer_id] then
+        player_pve[peer_id] = nil
+    end
+    updateGlobalPVPVEPopup()
     
     -- Notify player
     local state_text = new_state and "enabled" or "disabled"
@@ -1658,38 +1733,229 @@ function togglePlayerPVP(peer_id)
     return new_state
 end
 
--- Function to update PVP popup display
-function updatePlayerPVPPopup(peer_id)
-    -- Check if PVP is enabled for this player
-    if not player_pvp[peer_id] then
-        -- If PVP is disabled, remove the popup if it exists
-        local ui_id = player_pvp_popups[peer_id]
-        if ui_id then
-            server.removePopup(-1, ui_id)
-            player_pvp_popups[peer_id] = nil
-            if debug_mode then
-                server.announce("[DEBUG]", "PVP popup removed for player " .. peer_id, -1)
+-- Helper: truncate player names longer than 10 characters to 8 + '...'
+local function truncateName(name)
+    if not name then return "" end
+    if #name > 10 then
+        return string.sub(name,1,8) .. "..."
+    end
+    return name
+end
+
+-- Toggle PVE mode (mutually exclusive with PVP)
+function togglePlayerPVE(peer_id)
+    local current_state = player_pve[peer_id]
+    if current_state == nil then current_state = false end
+    local new_state = not current_state
+    player_pve[peer_id] = new_state
+
+    -- If enabling PVE, remove from PVP
+    if new_state and player_pvp[peer_id] then
+        player_pvp[peer_id] = nil
+    end
+
+    -- Apply invulnerability settings: both PVP and PVE mean vehicles are vulnerable (invulnerable = false)
+    local vehicles_updated = 0
+    if player_vehicle_groups[peer_id] then
+        for group_id, vehicles in pairs(player_vehicle_groups[peer_id]) do
+            for _, vehicle_id in ipairs(vehicles) do
+                server.setVehicleInvulnerable(vehicle_id, false)
+                vehicles_updated = vehicles_updated + 1
             end
         end
-        return
     end
 
-    -- If PVP is enabled, update or create the popup
-    local ui_id = player_pvp_popups[peer_id]
-    if not ui_id then
-        -- If popup doesn't exist, create a new one
-        ui_id = server.getMapID()
-        player_pvp_popups[peer_id] = ui_id
+    updateGlobalPVPVEPopup()
+
+    local state_text = new_state and "enabled" or "disabled"
+    server.announce("[MAL]", "PVE has been " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", peer_id)
+    if debug_mode then
+        server.announce("[DEBUG]", "Player " .. peer_id .. " toggled PVE to " .. state_text .. ". Updated " .. vehicles_updated .. " vehicles.", -1)
     end
 
-    -- Get player position
-    local player_pos, is_success = server.getPlayerPos(peer_id)
-    if is_success then
-        -- Adjust popup to new position without removing it
-        server.setPopup(-1, ui_id, "PVP", true, "[PVP ENABLED]",
-            player_pos[13], -- x
-            player_pos[14] + 2, -- y (2 meters above player)
-            player_pos[15], -- z
-            25) -- visible from 25 meters away
+    return new_state
+end
+
+-- Create or update a single global popup listing PvP and PvE players
+function updateGlobalPVPVEPopup()
+    -- Build two lists
+    local pvp_names = {}
+    local pve_names = {}
+    local players = server.getPlayers()
+    for _, p in pairs(players) do
+        local id = p.id
+        local name = truncateName(p.name)
+        if player_pvp[id] then
+            table.insert(pvp_names, name)
+        elseif player_pve[id] then
+            table.insert(pve_names, name)
+        end
+    end
+
+    local pvp_str = "PvP: " .. (next(pvp_names) and table.concat(pvp_names, ", ") or "None")
+    local pve_str = "PvE: " .. (next(pve_names) and table.concat(pve_names, ", ") or "None")
+    local full = pvp_str .. "\n" .. pve_str
+
+    -- Use a single global popup id; position at left edge, near top
+    server.setPopupScreen(-1, GLOBAL_PVPVE_POPUP_ID, "PVPvPVE", true, full, 0.9, 0)
+end
+
+-- Per-player HUD function: shows used lag cost and group order with indices
+function updatePlayerHUD(peer_id)
+    local used = player_lag_costs[peer_id] or 0
+    local limit = PLAYER_LAG_COST_LIMIT
+    -- Header now includes configurable server name and discord invite
+    local header = SERVER_NAME .. "\n" .. "discord:" .. "\n" .. DISCORD_INVITE .. "\n"
+    header = header .. "Lag: " .. tostring(math.floor(used)) .. " / " .. tostring(limit)
+
+    local order = player_group_order[peer_id]
+    local groups_line = "Groups: "
+    if order and #order > 0 then
+        local parts = {}
+        for i, gid in ipairs(order) do
+            table.insert(parts, "[" .. i .. "]" .. gid)
+        end
+        groups_line = groups_line .. table.concat(parts, ", ")
+    else
+        groups_line = groups_line .. "None"
+    end
+
+    local ui_id = 200 + peer_id
+    local text = header .. "\n" .. groups_line
+    server.setPopupScreen(peer_id, ui_id, "MAL HUD", true, text, -0.9, 0.8)
+
+    -- Also set altitude and speed popups for the player (moved closer to main HUD)
+    -- Altitude popup on left near HUD, speed popup just below it
+    local alt_ui = ALT_POPUP_BASE + peer_id
+    local spd_ui = SPD_POPUP_BASE + peer_id
+    -- Get player's approximate vehicle or player pos for readings
+    local display_alt = 0
+    local display_speed = 0
+    -- Prefer player's character pos
+    local ppos, ok = server.getPlayerPos(peer_id)
+    if ok and ppos then
+        local px, py, pz = matrix.position(ppos)
+        display_alt = math.floor(py or 0)
+    end
+    -- Compute speed from player_pos_history
+    local ph = player_pos_history[peer_id]
+    if ph then
+        display_speed = computeAverageSpeed(ph, 5000)
+    end
+
+    -- Convert speed according to player's preference
+    local unit = player_speed_unit[peer_id] or 1
+    local speed_value = display_speed
+    local unit_label = "m/s"
+    if unit == 1 then
+        -- km/h
+        speed_value = display_speed * 3.6
+        unit_label = "km/h"
+    elseif unit == 2 then
+        -- m/s
+        speed_value = display_speed
+        unit_label = "m/s"
+    elseif unit == 3 then
+        -- knots (1 m/s = 1.943844 knots)
+        speed_value = display_speed * 1.943844
+        unit_label = "kt"
+    end
+
+    -- Positions: move ALT/SPD closer to main HUD (HUD at -0.9,0.8), place ALT at -0.7,0.75 and SPD at -0.7,0.85
+    server.setPopupScreen(peer_id, alt_ui, "ALT", true, "Alt: " .. tostring(display_alt) .. " m", -0.7, 0.75)
+    server.setPopupScreen(peer_id, spd_ui, "SPD", true, "Speed: " .. string.format("%.2f %s", speed_value, unit_label) .. "", -0.7, 0.85)
+end
+
+
+-- Compute average speed (m/s) over last N seconds from history entries {t, x, z}
+function computeAverageSpeed(history, window_ms)
+    if not history or #history < 2 then return 0 end
+    local now = server.getTimeMillisec()
+    local cutoff = now - window_ms
+    local first_idx = nil
+    for i = #history, 1, -1 do
+        if history[i].t <= cutoff then
+            first_idx = i
+            break
+        end
+    end
+    if not first_idx then first_idx = 1 end
+    local start = history[first_idx]
+    local last = history[#history]
+    local dx = last.x - start.x
+    local dz = last.z - start.z
+    local dist = math.sqrt(dx*dx + dz*dz)
+    local dt = (last.t - start.t) / 1000
+    if dt <= 0 then return 0 end
+    return dist / dt
+end
+
+-- Update map objects for vehicles and for players
+function updateMapObjects()
+    -- Per-vehicle markers
+    for vehicle_id, info in pairs(vehicle_lag_costs) do
+        -- Get current vehicle position
+        local vpos, ok = server.getVehiclePos(vehicle_id)
+        if not ok or not vpos then
+            -- Ensure removal if vehicle disappeared
+            server.removeMapObject(-1, VEHICLE_MAP_UI_BASE + vehicle_id)
+            vehicle_pos_history[vehicle_id] = nil
+        else
+            local x, y, z = matrix.position(vpos)
+            -- Record history
+            vehicle_pos_history[vehicle_id] = vehicle_pos_history[vehicle_id] or {}
+            table.insert(vehicle_pos_history[vehicle_id], { t = server.getTimeMillisec(), x = x, z = z })
+            -- Trim history older than 6 seconds
+            local hist = vehicle_pos_history[vehicle_id]
+            local cutoff = server.getTimeMillisec() - 6000
+            while #hist > 0 and hist[1].t < cutoff do table.remove(hist, 1) end
+
+            local avg_speed = computeAverageSpeed(hist, 5000)
+            local alt = y or 0
+
+            -- Build labels
+            local owner = info.peer_id and server.getPlayerName(info.peer_id) or "Unknown"
+            local group_id = info.group_id or 0
+            local authors = "self"
+            if info.vehicle_authors and #info.vehicle_authors > 0 then
+                local auths = {}
+                for _, a in ipairs(info.vehicle_authors) do table.insert(auths, a.name or "?") end
+                authors = table.concat(auths, ", ")
+            end
+            local label = info.vehicle_name or "vehicle"
+            local hover = "Player: " .. owner .. "\nGroup: " .. tostring(group_id) .. "\nAuthors: " .. authors .. "\nAlt: " .. tostring(math.floor(alt)) .. "m\nAvgSpeed(5s): " .. string.format("%.2f", avg_speed) .. " m/s"
+
+            -- Replace previous map object for this vehicle so markers don't stack
+            local ui_id = VEHICLE_MAP_UI_BASE + vehicle_id
+            server.removeMapObject(-1, ui_id)
+            server.addMapObject(-1, ui_id, 1, 2, x, z, 0, 0, vehicle_id, 0, label, 0, hover, 255, 200, 50, 200)
+        end
+    end
+
+    -- Per-player summary markers
+    local players = server.getPlayers()
+    for _, p in pairs(players) do
+        local pid = p.id
+        local total = player_lag_costs[pid] or 0
+        local count = 0
+        if player_vehicle_groups[pid] then
+            for _, vs in pairs(player_vehicle_groups[pid]) do count = count + (#vs or 0) end
+        end
+        -- Place approximate marker at player's current position
+        local pos, ok = server.getPlayerPos(pid)
+        if ok and pos then
+            local x, y, z = matrix.position(pos)
+            -- Replace previous player map object so markers don't stack
+            local ui_id = PLAYER_MAP_UI_BASE + pid
+            local label = p.name .. " - Vehicles: " .. tostring(count)
+            local hover = "Player: " .. p.name .. "\nTotal Lag: " .. tostring(math.floor(total)) .. "\nVehicles: " .. tostring(count)
+            server.removeMapObject(-1, ui_id)
+            server.addMapObject(-1, ui_id, 0, 2, x, z, 0, 0, 0, 0, label, 0, hover, 100, 200, 255, 200)
+        else
+            -- Remove player map object if we cannot find position
+            server.removeMapObject(-1, PLAYER_MAP_UI_BASE + pid)
+        end
     end
 end
+
+-- Legacy per-player PVP popup removed; global popup is used instead.

@@ -1,5 +1,5 @@
 -- Existing script variables
-local discord = "4EqNtG9ZGX"
+local discord = "mayhemindustries"
 local systemName = "[Auth System]"
 local rules = {
     "===RULES===",
@@ -219,7 +219,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             removePopup(peer_id, ui_id)
             player_ui_ids[peer_id] = player_ui_ids[peer_id] + 1
             ui_id2 = peer_id * 101 + player_ui_ids[peer_id]
-            showPopup(peer_id, ui_id2, "To get auth, type \n?auth " .. peer_id .. " accept")
+            showPopup(peer_id, ui_id2, "To get auth, type these:\n?auth\n" .. peer_id .. "\naccept")
         end
     elseif command == "?help" then
         showHelp(peer_id, is_admin)
@@ -336,6 +336,8 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             return
         end
         listMyReports(peer_id)
+    elseif command == "?discord" then
+        announce("Discord:\ndiscord.gg/" .. discord,peer_id")
     end
 end
 
