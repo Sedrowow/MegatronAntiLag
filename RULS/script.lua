@@ -219,7 +219,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             removePopup(peer_id, ui_id)
             player_ui_ids[peer_id] = player_ui_ids[peer_id] + 1
             ui_id2 = peer_id * 101 + player_ui_ids[peer_id]
-            showPopup(peer_id, ui_id2, "To get auth, type these:\n?auth\n" .. peer_id .. "\naccept")
+            showPopup(peer_id, ui_id2, "To get auth, type these 3 lines at once:\n?auth\n" .. peer_id .. "\naccept")
         end
     elseif command == "?help" then
         showHelp(peer_id, is_admin)

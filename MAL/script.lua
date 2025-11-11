@@ -648,7 +648,7 @@ function onVehicleDespawn(vehicle_id, peer_id)
 
             -- If group is empty, remove it
             if #player_vehicle_groups[owner_peer_id][group_id] == 0 then
-                player_vehicle_groups[owner_peer_id][group_id] = nil
+                player_vehicle_groups[owner_peer_id][group_id] = nils
                 group_peer_mapping[group_id] = nil
             end
         end
