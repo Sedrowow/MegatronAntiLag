@@ -240,17 +240,17 @@ def ui():
             <div id="cmd-result"></div>
         </section>
         <script>
-            document.getElementById('cmd-form').addEventListener('submit', async (ev) => {
+            document.getElementById('cmd-form').addEventListener('submit', async (ev) => {{
                 ev.preventDefault();
                 const target = ev.target.target.value.trim();
                 const cmdRaw = ev.target.command.value;
                 let payload;
-                try { payload = JSON.parse(cmdRaw); } catch (err) { alert('Invalid JSON'); return; }
+                try {{ payload = JSON.parse(cmdRaw); }} catch (err) {{ alert('Invalid JSON'); return; }}
                 const endpoint = target.toUpperCase() === 'RULS' ? '/api/commands/ruls' : '/api/commands/mal';
-                const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+                const res = await fetch(endpoint, {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload) }});
                 const text = await res.text();
                 document.getElementById('cmd-result').innerText = text;
-            });
+            }});
         </script>
     </body>
     </html>
