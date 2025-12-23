@@ -4,7 +4,7 @@ better_mission_locations/
 personalmoney/
 automatedlogisticsfix/
 default_resource_trading/
-
+olscript.lua
 # Common ignores
 *.bak
 *.tmp
