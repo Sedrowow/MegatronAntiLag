@@ -60,285 +60,7 @@ local DISCONNECT_DESPAWN_DELAY = 120 -- 2 minutes in seconds
 local player_pvp = {}        -- [peer_id] = is_pvp_enabled
 local player_pvp_popups = {} -- [peer_id] = ui_id
 
--- Remote endpoint configuration
-local HTTP_ENABLED = true
-local HTTP_PORT = 12500
-local HTTP_PATH_MAL = "/api/mal"
-local HTTP_TOKEN = "changeme"  -- Shared secret for the Python endpoint
-local HTTP_PUSH_INTERVAL_MS = 5000
-local last_http_push = 0
 
--- URL escaping borrowed from the legacy olscript sender
-local uri_reserved = {
-    ["|"] = "|22", [" "] = "|20", ["!"] = "|21", ["#"] = "|23", ["$"] = "|24",
-    ["%"] = "|25", ["&"] = "|26", ['"'] = "|5e", ["'"] = "|27", ["("] = "|28",
-    [")"] = "|29", ["*"] = "|2a", ["+"] = "|2b", [","] = "|2c", ["/"] = "|2f",
-    [":"] = "|3a", [";"] = "|3b", ["="] = "|3d", ["?"] = "|3f", ["@"]= "|41",
-    ["["] = "|5b", ["]"] = "|5d", ["\\"] = "|5f"
-}
-
-local function escape(s)
-    return (s:gsub('[%,%^%$%(%)%%% %.%[%]%*%+%-%?%|]', '%%%1'))
-end
-
-local function json_encode(value)
-    local t = type(value)
-    if t == "nil" then return "null" end
-    if t == "boolean" then return tostring(value) end
-    if t == "number" then return tostring(value) end
-    if t == "string" then
-        local escaped = value:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
-        return '"' .. escaped .. '"'
-    end
-
-    local is_array = true
-    local idx = 1
-    for k, _ in pairs(value) do
-        if k ~= idx then
-            is_array = false
-            break
-        end
-        idx = idx + 1
-    end
-
-    local parts = {}
-    if is_array then
-        for i = 1, #value do
-            parts[#parts + 1] = json_encode(value[i])
-        end
-        return "[" .. table.concat(parts, ",") .. "]"
-    else
-        for k, v in pairs(value) do
-            parts[#parts + 1] = json_encode(k) .. ":" .. json_encode(v)
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    end
-end
-
--- Minimal JSON parser (supports objects/arrays/strings/numbers/bools/null)
-local function json_parse(str, pos)
-    pos = pos or 1
-    local function skip_ws()
-        local _, np = str:find("^%s*", pos)
-        pos = (np or pos - 1) + 1
-    end
-
-    local function parse_string()
-        pos = pos + 1
-        local start = pos
-        while pos <= #str do
-            local c = str:sub(pos, pos)
-            if c == '"' then
-                local s = str:sub(start, pos - 1)
-                pos = pos + 1
-                s = s:gsub('\\"', '"'):gsub('\\n', '\n'):gsub('\\r', '\r'):gsub('\\\\', '\\')
-                return s
-            elseif c == '\\' then
-                pos = pos + 2
-            else
-                pos = pos + 1
-            end
-        end
-        return nil
-    end
-
-    local function parse_number()
-        local s, e = str:find("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
-        local num = tonumber(str:sub(s, e))
-        pos = e + 1
-        return num
-    end
-
-    local function parse_value()
-        skip_ws()
-        local c = str:sub(pos, pos)
-        if c == '"' then
-            return parse_string()
-        elseif c == '{' then
-            pos = pos + 1
-            local obj = {}
-            skip_ws()
-            if str:sub(pos, pos) == '}' then
-                pos = pos + 1
-                return obj
-            end
-            while true do
-                skip_ws()
-                local key = parse_string()
-                skip_ws()
-                pos = pos + 1 -- skip ':'
-                obj[key] = parse_value()
-                skip_ws()
-                local delim = str:sub(pos, pos)
-                if delim == '}' then
-                    pos = pos + 1
-                    break
-                end
-                pos = pos + 1 -- skip ','
-            end
-            return obj
-        elseif c == '[' then
-            pos = pos + 1
-            local arr = {}
-            skip_ws()
-            if str:sub(pos, pos) == ']' then
-                pos = pos + 1
-                return arr
-            end
-            local i = 1
-            while true do
-                arr[i] = parse_value()
-                i = i + 1
-                skip_ws()
-                local delim = str:sub(pos, pos)
-                if delim == ']' then
-                    pos = pos + 1
-                    break
-                end
-                pos = pos + 1
-            end
-            return arr
-        elseif str:sub(pos, pos + 3) == "true" then
-            pos = pos + 4
-            return true
-        elseif str:sub(pos, pos + 4) == "false" then
-            pos = pos + 5
-            return false
-        elseif str:sub(pos, pos + 3) == "null" then
-            pos = pos + 4
-            return nil
-        else
-            return parse_number()
-        end
-    end
-
-    return parse_value()
-end
-
-local function http_encode_payload(payload)
-    local raw = json_encode(payload)
-    for k, v in pairs(uri_reserved) do
-        if raw:find(k, 1, true) then
-            raw = raw:gsub(escape(k), v)
-        end
-    end
-    return raw
-end
-
-local function mal_http_send(kind, payload)
-    if not HTTP_ENABLED then
-        return
-    end
-    local packet = {
-        source = "MAL",
-        kind = kind,
-        timestamp = server.getTimeMillisec(),
-        token = HTTP_TOKEN,
-        payload = payload
-    }
-    local encoded = http_encode_payload(packet)
-    local url = HTTP_PATH_MAL .. "?password=" .. HTTP_TOKEN .. "&data=" .. encoded
-    server.httpGet(HTTP_PORT, url)
-end
-
-local function collectVehicleSnapshot()
-    local vehicles = {}
-    for vehicle_id, info in pairs(vehicle_lag_costs) do
-        vehicles[#vehicles + 1] = {
-            vehicle_id = vehicle_id,
-            peer_id = info.peer_id,
-            player_name = server.getPlayerName(info.peer_id) or "Unknown",
-            group_id = info.group_id,
-            lag_cost = info.lag_cost,
-            is_ws = info.is_ws,
-            vehicle_name = info.vehicle_name,
-            authors = info.vehicle_authors
-        }
-    end
-    return vehicles
-end
-
-local function collectSettingsSnapshot()
-    return {
-        player_lag_cost_limit = PLAYER_LAG_COST_LIMIT,
-        player_lag_cost_limit_ws = PLAYER_LAG_COST_LIMIT_WS,
-        tps_threshold = TPS_THRESHOLD,
-        emergency_cleanup_tps = emergency_cleanup_tps,
-        disconnect_despawn_delay = DISCONNECT_DESPAWN_DELAY
-    }
-end
-
-local function pushMalStatus(force)
-    if not HTTP_ENABLED then
-        return
-    end
-    local now = server.getTimeMillisec()
-    if not force and (now - last_http_push) < HTTP_PUSH_INTERVAL_MS then
-        return
-    end
-    last_http_push = now
-
-    local payload = {
-        tps = TPS,
-        settings = collectSettingsSnapshot(),
-        vehicles = collectVehicleSnapshot(),
-        player_lag_costs = player_lag_costs,
-        disconnected_players = disconnected_players
-    }
-
-    mal_http_send("status", payload)
-end
-
-local function applyRemoteSettingChange(setting_key, setting_value)
-    if setting_key == "PLAYER_LAG_COST_LIMIT" then
-        PLAYER_LAG_COST_LIMIT = tonumber(setting_value) or PLAYER_LAG_COST_LIMIT
-    elseif setting_key == "PLAYER_LAG_COST_LIMIT_WS" then
-        PLAYER_LAG_COST_LIMIT_WS = tonumber(setting_value) or PLAYER_LAG_COST_LIMIT_WS
-    elseif setting_key == "TPS_THRESHOLD" then
-        TPS_THRESHOLD = tonumber(setting_value) or TPS_THRESHOLD
-    elseif setting_key == "EMERGENCY_CLEANUP_TPS" then
-        emergency_cleanup_tps = tonumber(setting_value) or emergency_cleanup_tps
-    elseif setting_key == "DISCONNECT_DESPAWN_DELAY" then
-        DISCONNECT_DESPAWN_DELAY = tonumber(setting_value) or DISCONNECT_DESPAWN_DELAY
-    end
-end
-
-local function handleMalCommand(cmd)
-    if not cmd or type(cmd) ~= "table" then
-        return
-    end
-
-    local action = cmd.action
-    if action == "despawn_vehicle" and cmd.vehicle_id then
-        local vehicle_info = vehicle_lag_costs[cmd.vehicle_id]
-        if vehicle_info then
-            despawnVehicleGroup(vehicle_info.group_id)
-        end
-    elseif action == "despawn_group" and cmd.group_id then
-        despawnVehicleGroup(cmd.group_id)
-    elseif action == "despawn_all" then
-        if cmd.peer_id then
-            despawnPlayerVehicles(cmd.peer_id)
-        else
-            server.cleanVehicles()
-        end
-    elseif action == "update_setting" and cmd.key then
-        applyRemoteSettingChange(cmd.key, cmd.value)
-    elseif action == "announce" and cmd.message then
-        server.announce("[MAL][Remote]", cmd.message, cmd.peer_id or -1)
-    elseif action == "cleanup" then
-        server.cleanVehicles()
-    end
-end
-
-local function handleMalCommands(commands)
-    if not commands or type(commands) ~= "table" then
-        return
-    end
-    for _, cmd in ipairs(commands) do
-        handleMalCommand(cmd)
-    end
-end
 
 function onCreate(is_world_create)
     if not is_world_create then
@@ -653,9 +375,6 @@ function announceGroupSpawn(group_id, peer_id)
 
     server.notify(-1,"[MAL]", message, 4)
 
-    -- Notify remote endpoint
-    pushMalStatus(true)
-
     -- Determine lag cost limit based on whether it's a workshop vehicle
     local lag_cost_limit = PLAYER_LAG_COST_LIMIT
     if is_ws_vehicle then
@@ -874,9 +593,6 @@ function despawnVehicleGroup(group_id)
     server.despawnVehicleGroup(group_id, true)
     server.notify(peer_id, "[MAL]", "Your vehicle group " .. group_id .. " has been despawned.", 2)
 
-    -- Push status update after a despawn
-    pushMalStatus(true)
-
     if debug_mode then
         server.announce("[DEBUG]", "Vehicle group " .. group_id .. " despawned. Updated lag cost for player " .. peer_id, -1)
     end
@@ -899,9 +615,6 @@ function despawnPlayerVehicles(peer_id)
     -- Clean up player data
     player_vehicle_groups[peer_id] = nil
     player_lag_costs[peer_id] = nil
-
-    -- Push status update after player-wide despawn
-    pushMalStatus(true)
 
     if debug_mode then
         server.announce("[DEBUG]", "All vehicles despawned for player " .. peer_id, -1)
@@ -1854,8 +1567,6 @@ function onTick(game_ticks)
         end
 
         -- Push status to the remote endpoint (rate limited)
-        pushMalStatus(false)
-
         -- Other game logic...
     else
         -- Optionally, you can pause other operations or provide feedback during the countdown
@@ -1972,23 +1683,4 @@ function updatePVPPopup()
 
     -- Display the popup to everyone
     server.setPopupScreen(-1, 2, "PVP Status", true, popup_text, -0.9, 0.5)
-end
-
--- Handle replies from the remote endpoint
-function httpReply(port, request, reply)
-    if not HTTP_ENABLED or port ~= HTTP_PORT then
-        return
-    end
-    if not reply or reply == "" or reply:sub(1, 1) ~= "{" then
-        return
-    end
-
-    local ok, parsed = pcall(json_parse, reply)
-    if not ok or not parsed then
-        return
-    end
-
-    if parsed.target == "MAL" and parsed.commands then
-        handleMalCommands(parsed.commands)
-    end
 end
