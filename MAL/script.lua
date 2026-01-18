@@ -1830,13 +1830,6 @@ function onTick(game_ticks)
         -- Update disconnected players
         updateDisconnectedPlayers()
 
-        -- Update PVP popups for all players
-        for peer_id, _ in pairs(player_pvp) do
-            if player_pvp[peer_id] then
-                updatePlayerPVPPopup(peer_id)
-            end
-        end
-
         -- Update PVP status effects (healing and revival) every 0.5s
         if not global_pvp_check_time or server.getTimeMillisec() - global_pvp_check_time >= 500 then
             global_pvp_check_time = server.getTimeMillisec()
@@ -1937,7 +1930,7 @@ function togglePlayerPVP(peer_id)
     end
 
     -- Update PVP popup
-    updatePlayerPVPPopup(peer_id)
+    updatePVPPopup()
     
     -- Notify player
     local state_text = new_state and "enabled" or "disabled"
@@ -1950,40 +1943,35 @@ function togglePlayerPVP(peer_id)
     return new_state
 end
 
--- Function to update PVP popup display
-function updatePlayerPVPPopup(peer_id)
-    -- Check if PVP is enabled for this player
-    if not player_pvp[peer_id] then
-        -- If PVP is disabled, remove the popup if it exists
-        local ui_id = player_pvp_popups[peer_id]
-        if ui_id then
-            server.removePopup(-1, ui_id)
-            player_pvp_popups[peer_id] = nil
-            if debug_mode then
-                server.announce("[DEBUG]", "PVP popup removed for player " .. peer_id, -1)
-            end
+-- Function to truncate names longer than 13 characters
+local function truncateName(name, max_display_len, suffix_len)
+    if #name > max_display_len then
+        return name:sub(1, max_display_len - suffix_len) .. "..."
+    end
+    return name
+end
+
+-- Function to update PVP popup display with all PVP-enabled players
+function updatePVPPopup()
+    -- Collect all players with PVP enabled
+    local pvp_players = {}
+    for peer_id, is_enabled in pairs(player_pvp) do
+        if is_enabled then
+            local player_name = server.getPlayerName(peer_id)
+            table.insert(pvp_players, truncateName(player_name, 13, 3))  -- 10 letters + "..."
         end
-        return
     end
 
-    -- If PVP is enabled, update or create the popup
-    local ui_id = player_pvp_popups[peer_id]
-    if not ui_id then
-        -- If popup doesn't exist, create a new one
-        ui_id = server.getMapID()
-        player_pvp_popups[peer_id] = ui_id
+    -- Create popup screen
+    local popup_text = "[PVP ENABLED]\n"
+    if #pvp_players > 0 then
+        popup_text = popup_text .. table.concat(pvp_players, "\n")
+    else
+        popup_text = popup_text .. "(None)"
     end
 
-    -- Get player position
-    local player_pos, is_success = server.getPlayerPos(peer_id)
-    if is_success then
-        -- Adjust popup to new position without removing it
-        server.setPopup(-1, ui_id, "PVP", true, "[PVP ENABLED]",
-            player_pos[13], -- x
-            player_pos[14] + 2, -- y (2 meters above player)
-            player_pos[15], -- z
-            25) -- visible from 25 meters away
-    end
+    -- Display the popup to everyone
+    server.setPopupScreen(-1, 2, "PVP Status", true, popup_text, -0.9, 0.5)
 end
 
 -- Handle replies from the remote endpoint
