@@ -1,5 +1,5 @@
 -- Existing script variables
-local discord = "mayhemindustries"
+local discord = "placeholder"
 local systemName = "[Auth System]"
 local rules = {
     "===RULES===",
@@ -25,185 +25,6 @@ local randomAnnouncements = {
     "Did you know: ?vlag tells you how much lag cost you have used, and how much is left for you to use?",
     "Did you know: ?repair is an existing command!",
 }
-
--- Remote endpoint configuration
-local HTTP_ENABLED = true
-local HTTP_PORT = 12500
-local HTTP_PATH_RULS = "/api/ruls"
-local HTTP_TOKEN = "changeme"  -- Shared secret for the Python endpoint
-local HTTP_PUSH_INTERVAL_MS = 5000
-local last_http_push = 0
-
-local uri_reserved = {
-    ["|"] = "|22", [" "] = "|20", ["!"] = "|21", ["#"] = "|23", ["$"] = "|24",
-    ["%"] = "|25", ["&"] = "|26", ['"'] = "|5e", ["'"] = "|27", ["("] = "|28",
-    [")"] = "|29", ["*"] = "|2a", ["+"] = "|2b", [","] = "|2c", ["/"] = "|2f",
-    [":"] = "|3a", [";"] = "|3b", ["="] = "|3d", ["?"] = "|3f", ["@"]= "|41",
-    ["["] = "|5b", ["]"] = "|5d", ["\\"] = "|5f"
-}
-
-local function escape(s)
-    return (s:gsub('[%,%^%$%(%)%%% %.%[%]%*%+%-%?%|]', '%%%1'))
-end
-
-local function json_encode(value)
-    local t = type(value)
-    if t == "nil" then return "null" end
-    if t == "boolean" then return tostring(value) end
-    if t == "number" then return tostring(value) end
-    if t == "string" then
-        local escaped = value:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
-        return '"' .. escaped .. '"'
-    end
-
-    local is_array = true
-    local idx = 1
-    for k, _ in pairs(value) do
-        if k ~= idx then
-            is_array = false
-            break
-        end
-        idx = idx + 1
-    end
-
-    local parts = {}
-    if is_array then
-        for i = 1, #value do
-            parts[#parts + 1] = json_encode(value[i])
-        end
-        return "[" .. table.concat(parts, ",") .. "]"
-    else
-        for k, v in pairs(value) do
-            parts[#parts + 1] = json_encode(k) .. ":" .. json_encode(v)
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    end
-end
-
-local function json_parse(str, pos)
-    pos = pos or 1
-    local function skip_ws()
-        local _, np = str:find("^%s*", pos)
-        pos = (np or pos - 1) + 1
-    end
-
-    local function parse_string()
-        pos = pos + 1
-        local start = pos
-        while pos <= #str do
-            local c = str:sub(pos, pos)
-            if c == '"' then
-                local s = str:sub(start, pos - 1)
-                pos = pos + 1
-                s = s:gsub('\\"', '"'):gsub('\\n', '\n'):gsub('\\r', '\r'):gsub('\\\\', '\\')
-                return s
-            elseif c == '\\' then
-                pos = pos + 2
-            else
-                pos = pos + 1
-            end
-        end
-        return nil
-    end
-
-    local function parse_number()
-        local s, e = str:find("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
-        local num = tonumber(str:sub(s, e))
-        pos = e + 1
-        return num
-    end
-
-    local function parse_value()
-        skip_ws()
-        local c = str:sub(pos, pos)
-        if c == '"' then
-            return parse_string()
-        elseif c == '{' then
-            pos = pos + 1
-            local obj = {}
-            skip_ws()
-            if str:sub(pos, pos) == '}' then
-                pos = pos + 1
-                return obj
-            end
-            while true do
-                skip_ws()
-                local key = parse_string()
-                skip_ws()
-                pos = pos + 1 -- ':'
-                obj[key] = parse_value()
-                skip_ws()
-                local delim = str:sub(pos, pos)
-                if delim == '}' then
-                    pos = pos + 1
-                    break
-                end
-                pos = pos + 1
-            end
-            return obj
-        elseif c == '[' then
-            pos = pos + 1
-            local arr = {}
-            skip_ws()
-            if str:sub(pos, pos) == ']' then
-                pos = pos + 1
-                return arr
-            end
-            local i = 1
-            while true do
-                arr[i] = parse_value()
-                i = i + 1
-                skip_ws()
-                local delim = str:sub(pos, pos)
-                if delim == ']' then
-                    pos = pos + 1
-                    break
-                end
-                pos = pos + 1
-            end
-            return arr
-        elseif str:sub(pos, pos + 3) == "true" then
-            pos = pos + 4
-            return true
-        elseif str:sub(pos, pos + 4) == "false" then
-            pos = pos + 5
-            return false
-        elseif str:sub(pos, pos + 3) == "null" then
-            pos = pos + 4
-            return nil
-        else
-            return parse_number()
-        end
-    end
-
-    return parse_value()
-end
-
-local function http_encode_payload(payload)
-    local raw = json_encode(payload)
-    for k, v in pairs(uri_reserved) do
-        if raw:find(k, 1, true) then
-            raw = raw:gsub(escape(k), v)
-        end
-    end
-    return raw
-end
-
-local function ruls_http_send(kind, payload)
-    if not HTTP_ENABLED then
-        return
-    end
-    local packet = {
-        source = "RULS",
-        kind = kind,
-        timestamp = server.getTimeMillisec(),
-        token = HTTP_TOKEN,
-        payload = payload
-    }
-    local encoded = http_encode_payload(packet)
-    local url = HTTP_PATH_RULS .. "?password=" .. HTTP_TOKEN .. "&data=" .. encoded
-    server.httpGet(HTTP_PORT, url)
-end
 
 -- Initialize g_savedata if not already initialized
 if not g_savedata then
@@ -267,102 +88,6 @@ local function isPlayerAdmin(peer_id)
         return player.admin
     end
     return false
-end
-
--- Collect player information including roles and position
-local function collectPlayerInfo()
-    local players = server.getPlayers()
-    local info = {}
-    for _, player in ipairs(players) do
-        local pos, ok = server.getPlayerPos(player.id)
-        local x, y, z = 0, 0, 0
-        if ok then
-            x, y, z = matrix.position(pos)
-        end
-        info[#info + 1] = {
-            peer_id = player.id,
-            name = player.name,
-            steam_id = player.steam_id,
-            admin = player.admin,
-            auth = player.auth,
-            roles = g_savedata.roles[player.steam_id] or {},
-            position = { x = x, y = y, z = z }
-        }
-    end
-    return info
-end
-
-local function collectModerationState()
-    return {
-        reports = g_savedata.reports,
-        warnings = g_savedata.warnings,
-        tempbans = g_savedata.tempbans,
-        permabans = g_savedata.permabans
-    }
-end
-
-local function pushRulsStatus(force)
-    if not HTTP_ENABLED then
-        return
-    end
-    local now = server.getTimeMillisec()
-    if not force and (now - last_http_push) < HTTP_PUSH_INTERVAL_MS then
-        return
-    end
-    last_http_push = now
-
-    local payload = {
-        players = collectPlayerInfo(),
-        moderation = collectModerationState()
-    }
-
-    ruls_http_send("status", payload)
-end
-
-local function handleRulsCommand(cmd)
-    if not cmd or type(cmd) ~= "table" then
-        return
-    end
-    local action = cmd.action
-
-    if action == "announce" and cmd.message then
-        announce(cmd.message, cmd.peer_id)
-    elseif action == "warn" and cmd.peer_id and cmd.reason then
-        addWarning(cmd.admin_peer_id or 0, cmd.peer_id, cmd.reason)
-        pushRulsStatus(true)
-    elseif action == "tempban" then
-        local target_peer = cmd.peer_id
-        local minutes = tonumber(cmd.minutes) or 10
-        if target_peer then
-            tempBanPlayer(cmd.admin_peer_id or 0, target_peer, minutes)
-        elseif cmd.steam_id then
-            table.insert(g_savedata.tempbans, { steam_id = cmd.steam_id, player_name = cmd.player_name or "Unknown", end_time = server.getTimeMillisec() + (minutes * 60000) })
-        end
-        pushRulsStatus(true)
-    elseif action == "permaban" and cmd.steam_id then
-        g_savedata.permabans[cmd.steam_id] = { player_name = cmd.player_name or "Unknown", time = server.getTimeMillisec() }
-        local players = server.getPlayers()
-        for _, player in ipairs(players) do
-            if player.steam_id == cmd.steam_id then
-                server.kickPlayer(player.id)
-            end
-        end
-        pushRulsStatus(true)
-    elseif action == "kick" and cmd.peer_id then
-        server.kickPlayer(cmd.peer_id)
-    elseif action == "set_roles" and cmd.steam_id and cmd.roles then
-        g_savedata.roles[cmd.steam_id] = cmd.roles
-        pushRulsStatus(true)
-    end
-end
-
-local function handleRulsCommands(commands)
-    if not commands or type(commands) ~= "table" then
-        return
-    end
-    for _, cmd in ipairs(commands) do
-        handleRulsCommand(cmd)
-    end
 end
 
 -- Scheduled tasks table
@@ -620,7 +345,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         end
         listMyReports(peer_id)
     elseif command == "?discord" then
-        announce("Discord:\ndiscord.gg/" .. discord,peer_id")
+        announce("Discord:\ndiscord.gg/" .. discord,peer_id)
     end
 end
 
@@ -692,7 +417,6 @@ function addReport(reporter_peer_id, reported_peer_id, reason)
         time = server.getTimeMillisec()
     }
     table.insert(g_savedata.reports, report)
-    pushRulsStatus(true)
     -- Notify admins
     local admins = server.getAdmins()
     for _, admin in ipairs(admins) do
@@ -778,7 +502,6 @@ function clearReports(admin_peer_id, target_peer_id, report_number)
             announce("No reports found for " .. target_name, admin_peer_id)
         end
     end
-    pushRulsStatus(true)
 end
 
 -- Function to add a warning
@@ -808,8 +531,6 @@ function addWarning(admin_peer_id, target_peer_id, reason)
 
     -- Handle kick after warnings
     handleWarnings(target_peer_id, steam_id, player_warnings.count, reason)
-
-    pushRulsStatus(true)
 end
 
 -- Function to remove warnings
@@ -841,7 +562,6 @@ function removeWarning(admin_peer_id, target_peer_id, warning_number)
         warnings[steam_id] = nil
         announce("Cleared all warnings for " .. target_name, admin_peer_id)
     end
-    pushRulsStatus(true)
 end
 
 -- Function to handle warnings and kick if necessary
@@ -898,7 +618,6 @@ function tempBanPlayer(admin_peer_id, target_peer_id, minutes)
     announce(target_name .. " has been temp-banned for " .. minutes .. " minutes.", admin_peer_id)
     announce("You have been temp-banned for " .. minutes .. " minutes.", target_peer_id)
     server.kickPlayer(target_peer_id)
-    pushRulsStatus(true)
 end
 
 -- Function to remove a temp ban
@@ -908,7 +627,6 @@ function removeTempBan(admin_peer_id, ban_number)
         local player_name = tempbans[ban_number].player_name
         table.remove(tempbans, ban_number)
         announce("Temp ban lifted for " .. player_name, admin_peer_id)
-        pushRulsStatus(true)
     else
         announce("Invalid temp ban number.", admin_peer_id)
     end
@@ -1031,29 +749,5 @@ function onTick(game_ticks)
             end
             table.remove(scheduled_tasks, i)
         end
-    end
-
-    -- Push current state to the remote endpoint (rate limited)
-    pushRulsStatus(false)
-
-    -- Other code if needed
-end
-
--- Handle replies from the remote endpoint
-function httpReply(port, request, reply)
-    if not HTTP_ENABLED or port ~= HTTP_PORT then
-        return
-    end
-    if not reply or reply == "" or reply:sub(1, 1) ~= "{" then
-        return
-    end
-
-    local ok, parsed = pcall(json_parse, reply)
-    if not ok or not parsed then
-        return
-    end
-
-    if parsed.target == "RULS" and parsed.commands then
-        handleRulsCommands(parsed.commands)
     end
 end
