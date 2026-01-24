@@ -23,6 +23,7 @@ local VOXEL_LAG_COST = 0.2  -- Adjust this value as needed
 local TPS_THRESHOLD = 35  -- Adjusted TPS threshold for your calculation method
 local tps_countdown = nil  -- Countdown timer in seconds
 local tps_warning_issued = false
+local low_tps_despawn_enabled = true
 
 -- TPS Calculation Variables
 local TIME = server.getTimeMillisec()
@@ -51,7 +52,6 @@ local player_vehicle_groups = {}     -- [peer_id] = {group_id = {vehicle_ids}}
 local group_peer_mapping = {}        -- [group_id] = peer_id
 local player_lag_costs = {}          -- [peer_id] = total_lag_cost
 local vehicle_loading = {}           -- [vehicle_id] = {peer_id, group_id}
-local group_tps_impact = {}          -- [group_id] = {pre_tps = number, check_time = number}
 local player_antisteal = {}  -- [peer_id] = is_antisteal_enabled
 
 local disconnected_players = {} -- [steam_id] = {despawn_time = number, peer_id = number}
@@ -106,7 +106,6 @@ function handleReloadCountdown()
             -- Reset tracking tables
             vehicle_lag_costs = {}
             vehicle_loading = {}
-            group_tps_impact = {}
             group_peer_mapping = {}
             player_vehicle_groups = {}
             player_lag_costs = {}
@@ -247,10 +246,9 @@ function updateVehicleLoading()
                 simulating_vehicles[v_id] = nil
             end
 
-            -- Announce group spawn and measure TPS impact once
+            -- Announce group spawn once per group
             announceGroupSpawn(group_id, owner_peer)
             notified_groups[group_id] = true
-            measureGroupTPSImpact(group_id)
         end
 
         ::continue_group::
@@ -386,46 +384,6 @@ function announceGroupSpawn(group_id, peer_id)
         -- Despawn the player's vehicles
         despawnPlayerVehicles(peer_id)
         server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
-    end
-end
-
--- Function to measure the TPS impact of a vehicle group
-function measureGroupTPSImpact(group_id)
-    -- Record pre-spawn TPS
-    local pre_tps = TPS  -- Use the adjusted TPS variable
-    -- Schedule TPS impact check after 8 seconds
-    local check_time = server.getTimeMillisec() + 8000  -- Current time + 8000 milliseconds
-    group_tps_impact[group_id] = {pre_tps = pre_tps, check_time = check_time}
-
-    if debug_mode then
-        server.announce("[DEBUG]", "Measuring TPS impact for group " .. group_id .. ". Pre-TPS: " .. pre_tps)
-    end
-end
-
--- Function to update and check TPS impact after countdown
-function updateGroupTPSImpact()
-    local current_time = server.getTimeMillisec()
-    for group_id, impact_info in pairs(group_tps_impact) do
-        if current_time >= impact_info.check_time then
-            -- Time to check TPS impact
-            local post_tps = TPS
-            local tps_drop = impact_info.pre_tps - post_tps
-
-            if debug_mode then
-                server.announce("[DEBUG]", "TPS impact check for group " .. group_id .. ". Post-TPS: " .. post_tps .. ", TPS Drop: " .. tps_drop)
-            end
-
-            if tps_drop >= 5 then  -- TPS dropped by 5 or more
-                -- Despawn the vehicle group
-                despawnVehicleGroup(group_id)
-                -- Notify the owner
-                local peer_id = group_peer_mapping[group_id]
-                server.announce("[MAL]", "Your vehicle has been despawned due to high TPS impact.", peer_id)
-            end
-
-            -- Clean up
-            group_tps_impact[group_id] = nil
-        end
     end
 end
 
@@ -689,7 +647,7 @@ function updateTPS(game_ticks)
     end
 
     -- Check if TPS is below threshold
-    if TPS < TPS_THRESHOLD then
+    if TPS < TPS_THRESHOLD and low_tps_despawn_enabled then
         if not tps_countdown then
             tps_countdown = 8  -- Start 8 seconds countdown
             tps_warning_issued = false
@@ -701,10 +659,10 @@ function updateTPS(game_ticks)
         end
     else
         if tps_countdown then
-            -- Remove the TPS countdown popup if TPS recovers
+            -- Remove the TPS countdown popup if TPS recovers or feature is disabled
             server.removePopup(-1, 1)
             if debug_mode then
-                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.", -1)
+                server.announce("[DEBUG]", "TPS recovered above threshold or low-TPS despawn disabled. Countdown stopped.", -1)
             end
         end
         tps_countdown = nil
@@ -736,6 +694,15 @@ end
 
 -- Function to handle TPS countdown and vehicle despawning
 function handleTPSCountdown()
+    if not low_tps_despawn_enabled then
+        if tps_countdown then
+            server.removePopup(-1, 1)
+            tps_countdown = nil
+            tps_warning_issued = false
+        end
+        return
+    end
+
     if tps_countdown then
         local tempo = server.getTimeMillisec()
         local elapsed_time = (tempo - tps_countdown_start_time) / 1000  -- Convert to seconds
@@ -1225,6 +1192,26 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
+    elseif command == "?tpsdespawn" then
+        if is_admin then
+            low_tps_despawn_enabled = not low_tps_despawn_enabled
+
+            if not low_tps_despawn_enabled then
+                -- Clear any active countdown when turning off
+                server.removePopup(-1, 1)
+                tps_countdown = nil
+                tps_warning_issued = false
+            end
+
+            local state = low_tps_despawn_enabled and "enabled" or "disabled"
+            server.announce("[MAL]", "Low-TPS despawn logic is now " .. state .. ".", -1)
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Admin " .. peer_id .. " toggled low TPS despawn to " .. state .. ".", -1)
+            end
+        else
+            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+        end
     elseif command == "?whatislagcost" then
         local lag_guide = "heres how lag cost is calculated:\n"
         lag_guide = lag_guide .."each voxel: 0.2\n"
@@ -1263,6 +1250,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?maxlagcostws [value] - Set workshop vehicle lag cost limit.\n"
             help_message = help_message .. "?mintps [tps_value] - Set TPS threshold for normal lag despawn.\n"
             help_message = help_message .. "?cleartps [tps_value] - Set TPS threshold for emergency cleanup.\n"
+            help_message = help_message .. "?tpsdespawn - Toggle low-TPS despawn logic.\n"
             help_message = help_message .. "?vlag [peer_id] - View another player's lag cost.\n"
         end
         server.announce("Server", help_message, peer_id)
@@ -1536,9 +1524,6 @@ function onTick(game_ticks)
 
         -- Update vehicle loading status
         updateVehicleLoading()
-
-        -- Update TPS impact checks
-        updateGroupTPSImpact()
 
         -- Update disconnected players
         updateDisconnectedPlayers()
