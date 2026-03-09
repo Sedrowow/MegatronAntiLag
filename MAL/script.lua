@@ -19,6 +19,9 @@ local COMPONENT_LAG_COSTS = {
 -- Define the lag cost per voxel
 local VOXEL_LAG_COST = 0.2  -- Adjust this value as needed
 
+-- Group load-time guard (ms). Groups taking longer than this are despawned on onGroupSpawn.
+local GROUP_LOAD_TIME_LIMIT_MS = 3000
+
 -- TPS Monitoring
 local TPS_THRESHOLD = 35  -- Adjusted TPS threshold for your calculation method
 local tps_countdown = nil  -- Countdown timer in seconds
@@ -51,7 +54,7 @@ local player_vehicle_groups = {}     -- [peer_id] = {group_id = {vehicle_ids}}
 local group_peer_mapping = {}        -- [group_id] = peer_id
 local player_lag_costs = {}          -- [peer_id] = total_lag_cost
 local vehicle_loading = {}           -- [vehicle_id] = {peer_id, group_id}
-local group_tps_impact = {}          -- [group_id] = {pre_tps = number, check_time = number}
+local vehicle_spawntime_map = {}     -- [vehicle_id] = onVehicleSpawn timestamp (ms)
 local player_antisteal = {}  -- [peer_id] = is_antisteal_enabled
 
 local disconnected_players = {} -- [steam_id] = {despawn_time = number, peer_id = number}
@@ -104,7 +107,7 @@ function handleReloadCountdown()
             -- Reset tracking tables
             vehicle_lag_costs = {}
             vehicle_loading = {}
-            group_tps_impact = {}
+            vehicle_spawntime_map = {}
             group_peer_mapping = {}
             player_vehicle_groups = {}
             player_lag_costs = {}
@@ -156,6 +159,9 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
         player_vehicle_groups[peer_id][group_id] = {}
     end
 
+    -- Track spawn timing per vehicle so parallel group spawns are measured independently.
+    vehicle_spawntime_map[vehicle_id] = server.getTimeMillisec()
+
     -- Add the vehicle to the player's group
     table.insert(player_vehicle_groups[peer_id][group_id], vehicle_id)
 
@@ -182,6 +188,47 @@ function onVehicleSpawn(vehicle_id, peer_id, x, y, z, cost, group_id)
                 server.announce("[DEBUG]", "Applied PVP state " .. tostring(is_pvp) .. " to vehicle " .. vehicle_id, -1)
             end
         end
+    end
+end
+
+-- Group-level spawn callback: despawn slow-loading groups immediately.
+function onGroupSpawn(group_id, peer_id, x, y, z, group_cost)
+    if peer_id < 0 then
+        return
+    end
+
+    local vehicles = player_vehicle_groups[peer_id] and player_vehicle_groups[peer_id][group_id]
+    if not vehicles or #vehicles == 0 then
+        return
+    end
+
+    local now = server.getTimeMillisec()
+    local slowest_elapsed_ms = 0
+    local slowest_vehicle_id = nil
+
+    for _, vehicle_id in ipairs(vehicles) do
+        local spawn_time = vehicle_spawntime_map[vehicle_id]
+        if spawn_time then
+            local elapsed_ms = now - spawn_time
+            if elapsed_ms > slowest_elapsed_ms then
+                slowest_elapsed_ms = elapsed_ms
+                slowest_vehicle_id = vehicle_id
+            end
+        end
+    end
+
+    if slowest_elapsed_ms > GROUP_LOAD_TIME_LIMIT_MS then
+        if debug_mode then
+            server.announce("[DEBUG]", "Group " .. group_id .. " exceeded load limit. Slowest vehicle " .. tostring(slowest_vehicle_id) .. " took " .. slowest_elapsed_ms .. "ms (limit " .. GROUP_LOAD_TIME_LIMIT_MS .. "ms). Despawning.", -1)
+        end
+
+        despawnVehicleGroup(group_id)
+        server.notify(peer_id, "[MAL]", "Vehicle group despawned: slowest vehicle load time " .. slowest_elapsed_ms .. "ms exceeded limit " .. GROUP_LOAD_TIME_LIMIT_MS .. "ms.", 2)
+        notified_groups[group_id] = nil
+    end
+
+    for _, vehicle_id in ipairs(vehicles) do
+        vehicle_spawntime_map[vehicle_id] = nil
     end
 end
 
@@ -248,7 +295,6 @@ function updateVehicleLoading()
             -- Announce group spawn and measure TPS impact once
             announceGroupSpawn(group_id, owner_peer)
             notified_groups[group_id] = true
-            measureGroupTPSImpact(group_id)
         end
 
         ::continue_group::
@@ -384,46 +430,6 @@ function announceGroupSpawn(group_id, peer_id)
         -- Despawn the player's vehicles
         despawnPlayerVehicles(peer_id)
         server.notify(peer_id, "[MAL]", "Your vehicles have been despawned due to exceeding the lag cost limit.", 2)
-    end
-end
-
--- Function to measure the TPS impact of a vehicle group
-function measureGroupTPSImpact(group_id)
-    -- Record pre-spawn TPS
-    local pre_tps = TPS  -- Use the adjusted TPS variable
-    -- Schedule TPS impact check after 8 seconds
-    local check_time = server.getTimeMillisec() + 8000  -- Current time + 8000 milliseconds
-    group_tps_impact[group_id] = {pre_tps = pre_tps, check_time = check_time}
-
-    if debug_mode then
-        server.announce("[DEBUG]", "Measuring TPS impact for group " .. group_id .. ". Pre-TPS: " .. pre_tps)
-    end
-end
-
--- Function to update and check TPS impact after countdown
-function updateGroupTPSImpact()
-    local current_time = server.getTimeMillisec()
-    for group_id, impact_info in pairs(group_tps_impact) do
-        if current_time >= impact_info.check_time then
-            -- Time to check TPS impact
-            local post_tps = TPS
-            local tps_drop = impact_info.pre_tps - post_tps
-
-            if debug_mode then
-                server.announce("[DEBUG]", "TPS impact check for group " .. group_id .. ". Post-TPS: " .. post_tps .. ", TPS Drop: " .. tps_drop)
-            end
-
-            if tps_drop >= 5 then  -- TPS dropped by 5 or more
-                -- Despawn the vehicle group
-                despawnVehicleGroup(group_id)
-                -- Notify the owner
-                local peer_id = group_peer_mapping[group_id]
-                server.announce("[MAL]", "Your vehicle has been despawned due to high TPS impact.", peer_id)
-            end
-
-            -- Clean up
-            group_tps_impact[group_id] = nil
-        end
     end
 end
 
@@ -574,6 +580,8 @@ function despawnVehicleGroup(group_id)
                 -- Remove from vehicle tracking
                 vehicle_lag_costs[vehicle_id] = nil
             end
+
+            vehicle_spawntime_map[vehicle_id] = nil
         end
         -- Remove group from player_vehicle_groups
         player_vehicle_groups[peer_id][group_id] = nil
@@ -586,6 +594,7 @@ function despawnVehicleGroup(group_id)
 
     -- Remove group from group_peer_mapping
     group_peer_mapping[group_id] = nil
+    notified_groups[group_id] = nil
 
     -- Despawn the group
     server.despawnVehicleGroup(group_id, true)
@@ -636,6 +645,7 @@ function onVehicleDespawn(vehicle_id, peer_id)
 
         -- Remove vehicle from tracking
         vehicle_lag_costs[vehicle_id] = nil
+        vehicle_spawntime_map[vehicle_id] = nil
 
         -- Remove from the group
         if player_vehicle_groups[owner_peer_id] and player_vehicle_groups[owner_peer_id][group_id] then
@@ -648,7 +658,7 @@ function onVehicleDespawn(vehicle_id, peer_id)
 
             -- If group is empty, remove it
             if #player_vehicle_groups[owner_peer_id][group_id] == 0 then
-                player_vehicle_groups[owner_peer_id][group_id] = nil
+                player_vehicle_groups[owner_peer_id][group_id] = nils
                 group_peer_mapping[group_id] = nil
             end
         end
@@ -1030,6 +1040,24 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
 
+    elseif command == "?maxloadtime" then
+        if is_admin then
+            local new_limit_ms = tonumber(args[1])
+            if new_limit_ms and new_limit_ms >= 500 and new_limit_ms <= 30000 then
+                GROUP_LOAD_TIME_LIMIT_MS = new_limit_ms
+                server.announce("[MAL]", "Set max vehicle group load time to " .. new_limit_ms .. "ms.", -1)
+                if debug_mode then
+                    server.announce("[DEBUG]", "Admin " .. peer_id .. " set GROUP_LOAD_TIME_LIMIT_MS to " .. new_limit_ms .. "ms.", -1)
+                end
+            elseif not new_limit_ms then
+                server.announce("[MAL]", "Current max vehicle group load time is " .. GROUP_LOAD_TIME_LIMIT_MS .. "ms.", peer_id)
+            else
+                server.announce("[MAL]", "Invalid value. Please enter milliseconds between 500 and 30000.", peer_id)
+            end
+        else
+            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+        end
+
     elseif command == "?announce" then
         if is_admin then
             local countdown = tonumber(args[1]) or 12  -- Default to 12 seconds
@@ -1259,6 +1287,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?clearlag [lag_cost] - Despawn vehicle groups exceeding lag_cost.\n"
             help_message = help_message .. "?maxlagcost <value> - Set maximum lag cost limit.\n"
             help_message = help_message .. "?maxlagcostws [value] - Set workshop vehicle lag cost limit.\n"
+            help_message = help_message .. "?maxloadtime <ms> - Set max vehicle group load time in milliseconds.\n"
             help_message = help_message .. "?mintps [tps_value] - Set TPS threshold for normal lag despawn.\n"
             help_message = help_message .. "?cleartps [tps_value] - Set TPS threshold for emergency cleanup.\n"
             help_message = help_message .. "?vlag [peer_id] - View another player's lag cost.\n"
@@ -1534,9 +1563,6 @@ function onTick(game_ticks)
 
         -- Update vehicle loading status
         updateVehicleLoading()
-
-        -- Update TPS impact checks
-        updateGroupTPSImpact()
 
         -- Update disconnected players
         updateDisconnectedPlayers()
