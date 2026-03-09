@@ -1,5 +1,5 @@
 -- Existing script variables
-local discord = "mayhemindustries"
+local discord = "placeholder"
 local systemName = "[Auth System]"
 local rules = {
     "===RULES===",
@@ -36,6 +36,8 @@ function initializeSavedData()
     g_savedata.reports = g_savedata.reports or {}
     g_savedata.warnings = g_savedata.warnings or {}
     g_savedata.tempbans = g_savedata.tempbans or {}
+    g_savedata.permabans = g_savedata.permabans or {}
+    g_savedata.roles = g_savedata.roles or {}
 end
 
 initializeSavedData()
@@ -97,6 +99,12 @@ local warning_countdowns = {}
 function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
     player_ui_ids[peer_id] = peer_id
     ui_id = peer_id * 100 + player_ui_ids[peer_id]
+
+    -- Block permabanned players
+    if g_savedata.permabans[steam_id] then
+        server.kickPlayer(peer_id)
+        return
+    end
 
     -- Check for temp ban
     local is_temp_banned = checkTempBanOnJoin(peer_id, steam_id, is_admin)
@@ -337,7 +345,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         end
         listMyReports(peer_id)
     elseif command == "?discord" then
-        announce("Discord:\ndiscord.gg/" .. discord,peer_id")
+        announce("Discord:\ndiscord.gg/" .. discord,peer_id)
     end
 end
 
@@ -742,6 +750,4 @@ function onTick(game_ticks)
             table.remove(scheduled_tasks, i)
         end
     end
-
-    -- Other code if needed
 end

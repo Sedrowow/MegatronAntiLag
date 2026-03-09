@@ -26,6 +26,7 @@ local GROUP_LOAD_TIME_LIMIT_MS = 3000
 local TPS_THRESHOLD = 35  -- Adjusted TPS threshold for your calculation method
 local tps_countdown = nil  -- Countdown timer in seconds
 local tps_warning_issued = false
+local low_tps_despawn_enabled = true
 
 -- TPS Calculation Variables
 local TIME = server.getTimeMillisec()
@@ -62,6 +63,8 @@ local DISCONNECT_DESPAWN_DELAY = 120 -- 2 minutes in seconds
 
 local player_pvp = {}        -- [peer_id] = is_pvp_enabled
 local player_pvp_popups = {} -- [peer_id] = ui_id
+
+
 
 function onCreate(is_world_create)
     if not is_world_create then
@@ -292,7 +295,7 @@ function updateVehicleLoading()
                 simulating_vehicles[v_id] = nil
             end
 
-            -- Announce group spawn and measure TPS impact once
+            -- Announce group spawn once per group
             announceGroupSpawn(group_id, owner_peer)
             notified_groups[group_id] = true
         end
@@ -697,7 +700,7 @@ function updateTPS(game_ticks)
     end
 
     -- Check if TPS is below threshold
-    if TPS < TPS_THRESHOLD then
+    if TPS < TPS_THRESHOLD and low_tps_despawn_enabled then
         if not tps_countdown then
             tps_countdown = 8  -- Start 8 seconds countdown
             tps_warning_issued = false
@@ -709,10 +712,10 @@ function updateTPS(game_ticks)
         end
     else
         if tps_countdown then
-            -- Remove the TPS countdown popup if TPS recovers
+            -- Remove the TPS countdown popup if TPS recovers or feature is disabled
             server.removePopup(-1, 1)
             if debug_mode then
-                server.announce("[DEBUG]", "TPS recovered above threshold. Countdown stopped.", -1)
+                server.announce("[DEBUG]", "TPS recovered above threshold or low-TPS despawn disabled. Countdown stopped.", -1)
             end
         end
         tps_countdown = nil
@@ -744,6 +747,15 @@ end
 
 -- Function to handle TPS countdown and vehicle despawning
 function handleTPSCountdown()
+    if not low_tps_despawn_enabled then
+        if tps_countdown then
+            server.removePopup(-1, 1)
+            tps_countdown = nil
+            tps_warning_issued = false
+        end
+        return
+    end
+
     if tps_countdown then
         local tempo = server.getTimeMillisec()
         local elapsed_time = (tempo - tps_countdown_start_time) / 1000  -- Convert to seconds
@@ -1251,6 +1263,26 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
+    elseif command == "?tpsdespawn" then
+        if is_admin then
+            low_tps_despawn_enabled = not low_tps_despawn_enabled
+
+            if not low_tps_despawn_enabled then
+                -- Clear any active countdown when turning off
+                server.removePopup(-1, 1)
+                tps_countdown = nil
+                tps_warning_issued = false
+            end
+
+            local state = low_tps_despawn_enabled and "enabled" or "disabled"
+            server.announce("[MAL]", "Low-TPS despawn logic is now " .. state .. ".", -1)
+
+            if debug_mode then
+                server.announce("[DEBUG]", "Admin " .. peer_id .. " toggled low TPS despawn to " .. state .. ".", -1)
+            end
+        else
+            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+        end
     elseif command == "?whatislagcost" then
         local lag_guide = "heres how lag cost is calculated:\n"
         lag_guide = lag_guide .."each voxel: 0.2\n"
@@ -1290,6 +1322,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?maxloadtime <ms> - Set max vehicle group load time in milliseconds.\n"
             help_message = help_message .. "?mintps [tps_value] - Set TPS threshold for normal lag despawn.\n"
             help_message = help_message .. "?cleartps [tps_value] - Set TPS threshold for emergency cleanup.\n"
+            help_message = help_message .. "?tpsdespawn - Toggle low-TPS despawn logic.\n"
             help_message = help_message .. "?vlag [peer_id] - View another player's lag cost.\n"
         end
         server.announce("Server", help_message, peer_id)
@@ -1567,13 +1600,6 @@ function onTick(game_ticks)
         -- Update disconnected players
         updateDisconnectedPlayers()
 
-        -- Update PVP popups for all players
-        for peer_id, _ in pairs(player_pvp) do
-            if player_pvp[peer_id] then
-                updatePlayerPVPPopup(peer_id)
-            end
-        end
-
         -- Update PVP status effects (healing and revival) every 0.5s
         if not global_pvp_check_time or server.getTimeMillisec() - global_pvp_check_time >= 500 then
             global_pvp_check_time = server.getTimeMillisec()
@@ -1597,6 +1623,7 @@ function onTick(game_ticks)
             end
         end
 
+        -- Push status to the remote endpoint (rate limited)
         -- Other game logic...
     else
         -- Optionally, you can pause other operations or provide feedback during the countdown
@@ -1671,7 +1698,7 @@ function togglePlayerPVP(peer_id)
     end
 
     -- Update PVP popup
-    updatePlayerPVPPopup(peer_id)
+    updatePVPPopup()
     
     -- Notify player
     local state_text = new_state and "enabled" or "disabled"
@@ -1684,38 +1711,33 @@ function togglePlayerPVP(peer_id)
     return new_state
 end
 
--- Function to update PVP popup display
-function updatePlayerPVPPopup(peer_id)
-    -- Check if PVP is enabled for this player
-    if not player_pvp[peer_id] then
-        -- If PVP is disabled, remove the popup if it exists
-        local ui_id = player_pvp_popups[peer_id]
-        if ui_id then
-            server.removePopup(-1, ui_id)
-            player_pvp_popups[peer_id] = nil
-            if debug_mode then
-                server.announce("[DEBUG]", "PVP popup removed for player " .. peer_id, -1)
-            end
+-- Function to truncate names longer than 13 characters
+local function truncateName(name, max_display_len, suffix_len)
+    if #name > max_display_len then
+        return name:sub(1, max_display_len - suffix_len) .. "..."
+    end
+    return name
+end
+
+-- Function to update PVP popup display with all PVP-enabled players
+function updatePVPPopup()
+    -- Collect all players with PVP enabled
+    local pvp_players = {}
+    for peer_id, is_enabled in pairs(player_pvp) do
+        if is_enabled then
+            local player_name = server.getPlayerName(peer_id)
+            table.insert(pvp_players, truncateName(player_name, 13, 3))  -- 10 letters + "..."
         end
-        return
     end
 
-    -- If PVP is enabled, update or create the popup
-    local ui_id = player_pvp_popups[peer_id]
-    if not ui_id then
-        -- If popup doesn't exist, create a new one
-        ui_id = server.getMapID()
-        player_pvp_popups[peer_id] = ui_id
+    -- Create popup screen
+    local popup_text = "[PVP ENABLED]\n"
+    if #pvp_players > 0 then
+        popup_text = popup_text .. table.concat(pvp_players, "\n")
+    else
+        popup_text = popup_text .. "(None)"
     end
 
-    -- Get player position
-    local player_pos, is_success = server.getPlayerPos(peer_id)
-    if is_success then
-        -- Adjust popup to new position without removing it
-        server.setPopup(-1, ui_id, "PVP", true, "[PVP ENABLED]",
-            player_pos[13], -- x
-            player_pos[14] + 2, -- y (2 meters above player)
-            player_pos[15], -- z
-            25) -- visible from 25 meters away
-    end
+    -- Display the popup to everyone
+    server.setPopupScreen(-1, 2, "PVP Status", true, popup_text, -0.9, 0.5)
 end

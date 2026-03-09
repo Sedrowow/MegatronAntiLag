@@ -7,7 +7,10 @@ default_resource_trading/
 data/
 backend/
 automatedlogisticsfix/
-
+automatedlogisticsfix/
+default_resource_trading/
+crushdepth/
+olscript.lua
 # Common ignores
 *.bak
 *.tmp
