@@ -1139,7 +1139,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             repairPlayerVehicles(peer_id)
         end
-        elseif command == "?tp" then
+    elseif command == "?tp" then
         if args[1] and args[2] and args[3] then
             local target_type = args[1]:lower()
             local action = args[2]:lower()
@@ -1217,7 +1217,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             server.announce("[MAL]", "Usage: ?tp <p|v> <b|g> <id>", peer_id)
         end
-        elseif command == "?flip" then
+    elseif command == "?flip" then
         if args[1] then
             local vehicle_id = tonumber(args[1])
             if vehicle_id then
@@ -1247,7 +1247,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
         end
-        elseif command == "?despawndelay" then
+    elseif command == "?despawndelay" then
         if is_admin then
             local new_delay = tonumber(args[1])
             if new_delay and new_delay > 0 then

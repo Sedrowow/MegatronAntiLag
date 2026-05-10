@@ -183,7 +183,7 @@ function onTick(game_ticks)
 		local players = server.getPlayers()
 		for _, player in ipairs(players) do
 			local peer_id = player.id or player.peer_id or player -- support both formats
-			server.setPopupScreen(peer_id, 1001, 0.7, 0.3, 0.28, 0.18, 1, popup_text)
+			server.setPopupScreen(peer_id, 1001, "[VOTE]", true, popup_text, 0.7, 0.3)
 		end
 
 		if getRatio() >= 1 then
