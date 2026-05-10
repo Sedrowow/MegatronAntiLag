@@ -147,22 +147,69 @@ function getRatio()
 end
 
 function onTick(game_ticks)
-	
+
 	if isVoteInProgress() then
+		-- Calculate yes/no votes
+		local yes_count = #votingdata
+		local total_voters = playercount
+		local no_count = 0
+		for peer_id, voted in pairs(hasVoteddata) do
+			if voted == true then
+				-- already counted as yes
+			else
+				no_count = no_count + 1
+			end
+		end
+		-- Countdown
+		local time_left = math.max(0, math.floor((votetime - tick) / 60))
+		-- Vote content
+		local vote_content = "Vote in progress"
+		if voteID == 1 then
+			vote_content = "Kick: " .. tostring(votetarget) .. " (" .. (server.getPlayerName and server.getPlayerName(votetarget) or "") .. ")"
+		elseif voteID == 2 then
+			vote_content = "Random Disaster"
+		elseif voteID == 3 then
+			vote_content = "Cleanup Server"
+		elseif voteID == 4 then
+			vote_content = "Custom: " .. (votetext or "")
+		elseif voteID == 5 then
+			vote_content = "Toggle Time Lock"
+		elseif voteID == 6 then
+			vote_content = "Toggle Weather Lock"
+		end
+		-- Popup text
+		local popup_text = "[VOTE] " .. vote_content .. "\nYes: " .. yes_count .. "  No: " .. no_count .. "\nTime left: " .. time_left .. "s"
+		-- Show popup to all players
+		local players = server.getPlayers()
+		for _, player in ipairs(players) do
+			local peer_id = player.id or player.peer_id or player -- support both formats
+			server.setPopupScreen(peer_id, 1001, 0.7, 0.3, 0.28, 0.18, 1, popup_text)
+		end
+
 		if getRatio() >= 1 then
 			voteSuccessfull()
 			voteEnd()
-		end
-		
-		tick = tick+game_ticks
-		if tick >= votetime then
-			tick = 0
-			if getRatio() < minrequirement then
-				server.notify(-1,"[VOTE]","Vote was unsuccessful",8)
-			else
-				voteSuccessfull()
+			-- Remove popup
+			for _, player in ipairs(players) do
+				local peer_id = player.id or player.peer_id or player
+				server.removePopup(peer_id, 1001)
 			end
-			voteEnd()
+		else
+			tick = tick+game_ticks
+			if tick >= votetime then
+				tick = 0
+				if getRatio() < minrequirement then
+					server.notify(-1,"[VOTE]","Vote was unsuccessful",8)
+				else
+					voteSuccessfull()
+				end
+				voteEnd()
+				-- Remove popup
+				for _, player in ipairs(players) do
+					local peer_id = player.id or player.peer_id or player
+					server.removePopup(peer_id, 1001)
+				end
+			end
 		end
 	end
 end
