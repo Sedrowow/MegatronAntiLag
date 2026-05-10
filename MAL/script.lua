@@ -63,6 +63,16 @@ local DISCONNECT_DESPAWN_DELAY = 120 -- 2 minutes in seconds
 
 local player_pvp = {}        -- [peer_id] = is_pvp_enabled
 local player_pvp_popups = {} -- [peer_id] = ui_id
+local systemName = "[MAL]"
+
+local function announce(message, peer_id)
+    message = message:gsub("\n", "\n| ")
+    if peer_id then
+        server.announce(systemName, "| " .. message, peer_id)
+    else
+        server.announce(systemName, "| " .. message)
+    end
+end
 
 
 
@@ -124,7 +134,7 @@ function handleReloadCountdown()
                 player_pvp[peer_id] = false
                 player_antisteal[peer_id] = true
                 server.setVehicleInvulnerable(peer_id, true)
-                server.announce("[MAL]", "PvP has been disabled and antisteal enabled for all players after reload.", peer_id)
+                announce("PvP has been disabled and antisteal enabled for all players after reload.", peer_id)
             end
 
             if debug_mode then
@@ -890,7 +900,7 @@ function showPlayerLagCost(target_peer_id, requesting_peer_id)
         message = message .. "\nNo vehicle groups."
     end
 
-    server.announce("[MAL]", message, requesting_peer_id)
+    announce(message, requesting_peer_id)
 end
 
 -- Function to clear laggy vehicles
@@ -965,9 +975,9 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         if is_admin then
             debug_mode = not debug_mode  -- Toggle debug mode
             local state = debug_mode and "enabled" or "disabled"
-            server.announce("[MAL]", "Debug mode " .. state .. ".", peer_id)
+            announce("Debug mode " .. state .. ".", peer_id)
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            announce("You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?vlag" or command == "?vlist" then
@@ -977,10 +987,10 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 if target_peer_id then
                     showPlayerLagCost(target_peer_id, peer_id)
                 else
-                    server.announce("[MAL]", "Invalid peer_id.", peer_id)
+                    announce("Invalid peer_id.", peer_id)
                 end
             else
-                server.announce("[MAL]", "You do not have permission to view other players' lag cost.", peer_id)
+                announce("You do not have permission to view other players' lag cost.", peer_id)
             end
         else
             showPlayerLagCost(peer_id, peer_id)
@@ -989,7 +999,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     elseif command == "?cleanup" then
         if is_admin then
             server.cleanVehicles()
-            server.announce("[MAL]", "Cleanup has been issued by admin, sorry for any inconvenience caused.", -1)
+            announce("Cleanup has been issued by admin, sorry for any inconvenience caused.")
             if debug_mode then
                 server.announce("[DEBUG]", "Admin " .. peer_id .. " issued cleanup.", -1)
             end
@@ -1004,7 +1014,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 lag_threshold = PLAYER_LAG_COST_LIMIT / 2
             end
             clearLag(lag_threshold)
-            server.announce("[MAL]", "Cleared vehicles above lag cost " .. lag_threshold .. ".", -1)
+            announce("Cleared vehicles above lag cost " .. lag_threshold .. ".")
             if debug_mode then
                 server.announce("[DEBUG]", "Admin " .. peer_id .. " issued clearlag with threshold " .. lag_threshold .. ".", -1)
             end
@@ -1018,15 +1028,15 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             if new_limit and new_limit >= 1000 and new_limit <= 50000 then
                 PLAYER_LAG_COST_LIMIT = new_limit
                 PLAYER_LAG_COST_LIMIT_WS = new_limit / 2  -- Reset WS limit to half of new limit
-                server.announce("[MAL]", "Set maximum lag cost to " .. new_limit .. ".", -1)
+                announce("Set maximum lag cost to " .. new_limit .. ".")
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT to " .. new_limit .. ".", -1)
                 end
             else
-                server.announce("[MAL]", "Invalid value. Please enter a number between 1000 and 50000.", peer_id)
+                announce("Invalid value. Please enter a number between 1000 and 50000.", peer_id)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            announce("You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?maxlagcostws" then
@@ -1034,22 +1044,22 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             local new_limit = tonumber(args[1])
             if new_limit and new_limit >= 500 and new_limit <= 25000 then
                 PLAYER_LAG_COST_LIMIT_WS = new_limit
-                server.announce("[MAL]", "Set workshop vehicle lag cost limit to " .. new_limit .. ".", -1)
+                announce("Set workshop vehicle lag cost limit to " .. new_limit .. ".")
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " set PLAYER_LAG_COST_LIMIT_WS to " .. new_limit .. ".", -1)
                 end
             elseif not(new_limit) then
                 -- Reset to half of current PLAYER_LAG_COST_LIMIT
                 PLAYER_LAG_COST_LIMIT_WS = PLAYER_LAG_COST_LIMIT / 2
-                server.announce("[MAL]", "Reset workshop vehicle lag cost limit to " .. PLAYER_LAG_COST_LIMIT_WS .. ".", -1)
+                announce("Reset workshop vehicle lag cost limit to " .. PLAYER_LAG_COST_LIMIT_WS .. ".")
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " reset PLAYER_LAG_COST_LIMIT_WS to " .. PLAYER_LAG_COST_LIMIT_WS .. ".", -1)
                 end
             else
-                server.announce("[MAL]", "Invalid value. Please enter a number between 500 and 25000.", peer_id)
+                announce("Invalid value. Please enter a number between 500 and 25000.", peer_id)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            announce("You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?maxloadtime" then
@@ -1057,17 +1067,17 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             local new_limit_ms = tonumber(args[1])
             if new_limit_ms and new_limit_ms >= 500 and new_limit_ms <= 30000 then
                 GROUP_LOAD_TIME_LIMIT_MS = new_limit_ms
-                server.announce("[MAL]", "Set max vehicle group load time to " .. new_limit_ms .. "ms.", -1)
+                announce("Set max vehicle group load time to " .. new_limit_ms .. "ms.")
                 if debug_mode then
                     server.announce("[DEBUG]", "Admin " .. peer_id .. " set GROUP_LOAD_TIME_LIMIT_MS to " .. new_limit_ms .. "ms.", -1)
                 end
             elseif not new_limit_ms then
-                server.announce("[MAL]", "Current max vehicle group load time is " .. GROUP_LOAD_TIME_LIMIT_MS .. "ms.", peer_id)
+                announce("Current max vehicle group load time is " .. GROUP_LOAD_TIME_LIMIT_MS .. "ms.", peer_id)
             else
-                server.announce("[MAL]", "Invalid value. Please enter milliseconds between 500 and 30000.", peer_id)
+                announce("Invalid value. Please enter milliseconds between 500 and 30000.", peer_id)
             end
         else
-            server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
+            announce("You do not have permission to use this command.", peer_id)
         end
 
     elseif command == "?announce" then
@@ -1081,7 +1091,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
                 full_message = table.concat(args, " ", 2)
             end
             if full_message == "" then
-                server.announce("[MAL]", "Please provide a message to announce.", peer_id)
+                announce("Please provide a message to announce.", peer_id)
                 return
             end
             -- Remove any leading question marks or command prefixes
@@ -1092,14 +1102,14 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             server.announce("[ANNOUNCEMENT]", full_message)
             server.notify(-1, "[ANNOUNCEMENT]", full_message,8)
         else
-            server.announce("[MAL]", "You dont have the permission to use this command.", peer_id)
+            announce("You dont have the permission to use this command.", peer_id)
         end
     -- NPC Management Commands
     elseif command == "?npc" then
         local name = args[1]
         local char_type = tonumber(args[2]) or 11  -- Default to 11 (civilian)
         if not name then
-            server.announce("[MAL]", "Usage: ?npc <name> [type]", peer_id)
+            announce("Usage: ?npc <name> [type]", peer_id)
             return
         end
         spawnNPC(peer_id, name, char_type)
@@ -1112,7 +1122,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         local npc_id = tonumber(args[1])
         local ai_state = tonumber(args[2]) or 0  -- Default to 0 (none)
         if not npc_id then
-            server.announce("[MAL]", "Usage: ?AIType <npc_id> [ai_state]", peer_id)
+            announce("Usage: ?AIType <npc_id> [ai_state]", peer_id)
             return
         end
         setNPC_AIState(peer_id, npc_id, ai_state)
@@ -1124,7 +1134,7 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             if group_id then
                 repairGroup(peer_id, group_id, is_admin)
             else
-                server.announce("[MAL]", "Invalid group_id.", peer_id)
+                announce("Invalid group_id.", peer_id)
             end
         else
             repairPlayerVehicles(peer_id)
@@ -1209,26 +1219,26 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         end
         elseif command == "?flip" then
         if args[1] then
-            local vehicle_id = tonumber(args[1])
+                                announce("Player " .. target_id .. " has been brought to you.", peer_id)
             if vehicle_id then
-                local vehicle_pos, is_success = server.getVehiclePos(vehicle_id)
+                                announce("Failed to get your position.", peer_id)
                 if is_success then
                     server.setVehiclePos(vehicle_id, vehicle_pos)
-                    server.announce("[MAL]", "Vehicle " .. vehicle_id .. " has been flipped.", peer_id)
+                            announce("Failed to get target player's position.", peer_id)
                 else
                     server.announce("[MAL]", "Failed to get vehicle position.", peer_id)
-                end
+                        announce("You do not have permission to use this command.", peer_id)
             else
                 server.announce("[MAL]", "Invalid vehicle ID.", peer_id)
             end
         else
             server.announce("[MAL]", "Usage: ?flip <vehicle_id>", peer_id)
-        end
+                        announce("You have been teleported to player " .. target_id .. ".", peer_id)
     elseif command == "?mintps" then
-        if is_admin then
+                        announce("Failed to get target player's position.", peer_id)
             local TPS_THRESHOLD = tonumber(args[1])
             if not TPS_THRESHOLD then
-                TPS_THRESHOLD = 35
+                    announce("Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
             end
             server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. TPS_THRESHOLD .. ".", -1)
             if debug_mode then
@@ -1240,15 +1250,15 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         elseif command == "?despawndelay" then
         if is_admin then
             local new_delay = tonumber(args[1])
-            if new_delay and new_delay > 0 then
+                                announce("Vehicle group " .. target_id .. " has been brought to you.", peer_id)
                 DISCONNECT_DESPAWN_DELAY = new_delay
-                server.announce("[MAL]", "Despawn delay set to " .. new_delay .. " seconds.", peer_id)
+                                announce("Failed to get vehicle group.", peer_id)
             else
                 server.announce("[MAL]", "Invalid delay value.", peer_id)
-            end
+                            announce("Failed to get your position.", peer_id)
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
-        end
+                        announce("You do not have permission to use this command.", peer_id)
     elseif command == "?cleartps" then
         if is_admin then
             local tps_threshold = tonumber(args[1])
@@ -1257,21 +1267,21 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             end
             emergency_cleanup_tps = tps_threshold
             server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. tps_threshold .. ".", -1)
-            if debug_mode then
+                            announce("You have been teleported to vehicle group " .. target_id .. ".", peer_id)
                 server.announce("[DEBUG]", "Admin " .. peer_id .. " set W cleanup TPS threshold to " .. tps_threshold .. ".", -1)
-            end
+                            announce("Failed to get vehicle position.", peer_id)
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
-        end
+                        announce("Failed to get vehicle group.", peer_id)
     elseif command == "?tpsdespawn" then
         if is_admin then
-            low_tps_despawn_enabled = not low_tps_despawn_enabled
+                    announce("Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
 
             if not low_tps_despawn_enabled then
-                -- Clear any active countdown when turning off
+                announce("Invalid target type. Use 'p' for player or 'v' for vehicle group.", peer_id)
                 server.removePopup(-1, 1)
                 tps_countdown = nil
-                tps_warning_issued = false
+            announce("Usage: ?tp <p/v> <b/g> <target_id>", peer_id)
             end
 
             local state = low_tps_despawn_enabled and "enabled" or "disabled"
@@ -1310,7 +1320,10 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         help_message = help_message .. "?delnpc [npc_id] - Despawn your NPCs or a specific NPC by ID.\n"
         help_message = help_message .. "?npclist - List your current spawned NPCs.\n"
         help_message = help_message .. "?AIType <npc_id> [ai_state] - Set AI state for your NPC.\n"
+        help_message = help_message .. "?tp <p/v> <b/g> <target_id> - Bring or go to a player or vehicle group.\n"
+        help_message = help_message .. "?as / ?antisteal - Toggle antisteal for your vehicles.\n"
         help_message = help_message .. "?pvp - Toggle PVP mode for your vehicles.\n"
+        help_message = help_message .. "?whatislagcost - Explain how lag cost is calculated.\n"
     
         if is_admin then
             help_message = help_message .. "\nAdmin Commands:\n"
@@ -1323,9 +1336,10 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             help_message = help_message .. "?mintps [tps_value] - Set TPS threshold for normal lag despawn.\n"
             help_message = help_message .. "?cleartps [tps_value] - Set TPS threshold for emergency cleanup.\n"
             help_message = help_message .. "?tpsdespawn - Toggle low-TPS despawn logic.\n"
+            help_message = help_message .. "?despawndelay [seconds] - Set delay before despawning vehicles after player disconnects.\n"
             help_message = help_message .. "?vlag [peer_id] - View another player's lag cost.\n"
         end
-        server.announce("Server", help_message, peer_id)
+        announce(help_message, peer_id)
 
     elseif command == "?as" or command == "?antisteal" then
         togglePlayerAntisteal(peer_id)

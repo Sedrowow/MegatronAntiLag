@@ -1,6 +1,6 @@
 -- Existing script variables
 local discord = "placeholder"
-local systemName = "[Auth System]"
+local systemName = "[RULS]"
 local rules = {
     "===RULES===",
     "1) Please use common sense and stop doing a certain action when told to.",
@@ -51,6 +51,7 @@ local function removePopup(peer_id, ui_id)
 end
 
 local player_ui_ids = {}
+local auth_popup_ids = {}
 
 -- Function to get player data by peer_id
 local function getPlayerData(peer_id)
@@ -97,8 +98,8 @@ local scheduled_tasks = {}
 local warning_countdowns = {}
 
 function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
-    player_ui_ids[peer_id] = peer_id
-    ui_id = peer_id * 100 + player_ui_ids[peer_id]
+    local auth_popup_id = 10000 + peer_id
+    auth_popup_ids[peer_id] = auth_popup_id
 
     -- Block permabanned players
     if g_savedata.permabans[steam_id] then
@@ -116,10 +117,10 @@ function onPlayerJoin(steam_id, name, peer_id, is_admin, is_auth)
     -- Auth system
     if is_auth and not is_admin then
         server.removeAuth(peer_id)
-        showPopup(peer_id, ui_id, "To get authed\ntype ?rules")
+        showPopup(peer_id, auth_popup_id, "To get authed\ntype ?rules")
         announce("To get authed again, type ?rules", peer_id)
     elseif not is_auth and not is_admin then
-        showPopup(peer_id, ui_id, "To get authed\ntype ?rules")
+        showPopup(peer_id, auth_popup_id, "To get authed\ntype ?rules")
         announce("To get authed, type ?rules", peer_id)
     end
     if is_admin then
@@ -216,18 +217,16 @@ end
 function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
     command = string.lower(command)
     local args = {...}
-    player_ui_ids[peer_id] = player_ui_ids[peer_id] or peer_id
-    ui_id = peer_id * 100 + player_ui_ids[peer_id]
+    local auth_popup_id = auth_popup_ids[peer_id] or (10000 + peer_id)
+    auth_popup_ids[peer_id] = auth_popup_id
 
     if command == "?rules" then
         local rulesText = table.concat(rules, "\n")
         announce(rulesText, peer_id)
 
         if not is_auth then
-            removePopup(peer_id, ui_id)
-            player_ui_ids[peer_id] = player_ui_ids[peer_id] + 1
-            ui_id2 = peer_id * 101 + player_ui_ids[peer_id]
-            showPopup(peer_id, ui_id2, "To get auth, type these 3 lines at once:\n?auth\n" .. peer_id .. "\naccept")
+            removePopup(peer_id, auth_popup_id)
+            showPopup(peer_id, auth_popup_id, "To get auth, type these 3 lines at once:\n?auth\n" .. peer_id .. "\naccept")
         end
     elseif command == "?help" then
         showHelp(peer_id, is_admin)
@@ -253,7 +252,8 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         if peer_id == peerID and two == "accept" then
             server.addAuth(peer_id)
             announce("You have been granted auth", peer_id)
-            removePopup(peer_id, ui_id2)
+            removePopup(peer_id, auth_popup_id)
+            auth_popup_ids[peer_id] = nil
         else
             announce("That is not your player_id! Your player id is: '" .. peer_id .. "'!", peer_id)
         end

@@ -3,8 +3,21 @@ local commands = {
 	"?vote yes/no  for a apporval or disapporoval of the vote",
 	"?vote kick user_id - vote kick someone out",
 	"?vote disaster - vote for a random disatser",
-	"?vote text (full vote message) - do a custom vote, just put in your vote after 'text ' and youre good to go!"
+	"?vote text (full vote message) - do a custom vote, just put in your vote after 'text ' and youre good to go!",
+	"?vote timelock - vote to toggle the time lock",
+	"?vote weatherlock - vote to toggle the weather lock"
 }
+
+local systemName = "[VOTE]"
+
+local function announce(message, peer_id)
+	message = message:gsub("\n", "\n| ")
+	if peer_id then
+		server.announce(systemName, "| " .. message, peer_id)
+	else
+		server.announce(systemName, "| " .. message)
+	end
+end
 
 
 function onCreate(is_world_create)
@@ -20,6 +33,9 @@ function onCreate(is_world_create)
 	votetarget = nil
 	voteID = 0
 	votetext = nil
+	time_lock_enabled = false
+	weather_lock_enabled = false
+	locked_weather = nil
 end
 
 minVoteKickRequirement = 0.75
@@ -76,7 +92,7 @@ function pickRandomDisaster(id)
 end
 
 function voteSuccessfull()
-	server.notify(-1,"[VOTE]","Vote was successful",8)
+	announce("Vote was successful")
 	if voteID == 1 then
 		server.kickPlayer(votetarget)
 	end	
@@ -85,10 +101,31 @@ function voteSuccessfull()
 	end
 	if voteID == 3 then
 		server.cleanVehicles()
-		server.announce("[VOTE]", "Server has been cleaned up by vote! Sorry for any inconvenience caused.")
+		announce("Server has been cleaned up by vote! Sorry for any inconvenience caused.")
 	end
 	if voteID == 4 then
-	    server.announce("[VOTE]", "succesful Vote: "..votetext)
+	    announce("succesful Vote: "..votetext)
+	end
+	if voteID == 5 then
+		time_lock_enabled = not time_lock_enabled
+		server.setGameSetting("override_time", time_lock_enabled)
+		announce("Time lock has been " .. (time_lock_enabled and "enabled" or "disabled") .. ".")
+	end
+	if voteID == 6 then
+		weather_lock_enabled = not weather_lock_enabled
+		server.setGameSetting("override_weather", weather_lock_enabled)
+		if weather_lock_enabled then
+			local weather = server.getWeather(matrix.translation(0, 0, 0))
+			if weather then
+				locked_weather = {
+					fog = weather.fog or 0,
+					rain = weather.rain or 0,
+					wind = weather.wind or 0
+				}
+				server.setWeather(locked_weather.fog, locked_weather.rain, locked_weather.wind)
+			end
+		end
+		announce("Weather lock has been " .. (weather_lock_enabled and "enabled" or "disabled") .. ".")
 	end
 end
 
@@ -262,7 +299,7 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		if arg1 == "kick" then
 			if not isVoteInProgress() then
 				voteStart(minVoteKickRequirement,1)
-				server.announce("[VOTE]","Started kick vote against: "..arg2.." : "..server.getPlayerName(arg2)..". '?vote yes' to agree, or '?vote no' to disagree!")
+				announce("Started kick vote against: "..arg2.." : "..server.getPlayerName(arg2)..". '?vote yes' to agree, or '?vote no' to disagree!")
 				server.notify(-1,"[VOTE]", cNameStr(user_peer_id).." Started a votekick againts "..arg2.." : "..server.getPlayerName(arg2),8)
 				votetarget = arg2
 			else
@@ -273,7 +310,7 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		if arg1 == "disaster" then
 			if not isVoteInProgress() then
 				voteStart(minVoteDistasterRequirement,2)
-				server.announce("[VOTE]","Started disaster vote, '?vote yes' to agree, or '?vote no' to disagree!")
+				announce("Started disaster vote, '?vote yes' to agree, or '?vote no' to disagree!")
 				server.notify(-1,"[VOTE]", cNameStr(user_peer_id).." Started a vote for a random distaster",8)
 				votetarget = user_peer_id
 			else
@@ -283,7 +320,7 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		if arg1 == "cleanup" then
 			if not isVoteInProgress() then
 				voteStart(0.6,3)
-				server.announce("[VOTE]","Started cleanup vote, '?vote yes' to agree, or '?vote no' to disagree!")
+				announce("Started cleanup vote, '?vote yes' to agree, or '?vote no' to disagree!")
 				server.notify(-1,"[VOTE]", cNameStr(user_peer_id).." Started a vote for cleanup",8)
 				votetarget = user_peer_id
 			else
@@ -295,13 +332,33 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		       		voteStart(0.5, 4)
 		        	full_message = full_message:gsub("%^?vote text ","")
 		        	full_message = full_message:gsub("%?","")
-		        	server.announce("[VOTE]","Started text Vote, '?vote yes' to agree, or '?vote no' to disagree!")
+	        	announce("Started text Vote, '?vote yes' to agree, or '?vote no' to disagree!")
 				server.notify(-1,"[VOTE]", cNameStr(user_peer_id).." Started vote: \n"..full_message,8)
 				votetext = full_message
 			else
 		        VoteInProgress(user_peer_id)
 			end
         	end
+		if arg1 == "timelock" then
+			if not isVoteInProgress() then
+				voteStart(0.5, 5)
+				announce("Started time lock vote, '?vote yes' to agree, or '?vote no' to disagree!")
+				server.notify(-1, "[VOTE]", cNameStr(user_peer_id) .. " Started a vote to toggle time lock", 8)
+				votetarget = user_peer_id
+			else
+				VoteInProgress(user_peer_id)
+			end
+		end
+		if arg1 == "weatherlock" then
+			if not isVoteInProgress() then
+				voteStart(0.5, 6)
+				announce("Started weather lock vote, '?vote yes' to agree, or '?vote no' to disagree!")
+				server.notify(-1, "[VOTE]", cNameStr(user_peer_id) .. " Started a vote to toggle weather lock", 8)
+				votetarget = user_peer_id
+			else
+				VoteInProgress(user_peer_id)
+			end
+		end
 		if arg1 == "vevo" and is_admin then
 			if isVoteInProgress() then
 				voteEnd()
@@ -317,7 +374,7 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
         		function(commands) return true end, 
         		function(commands) return help end
         		)
-			server.announce("[VOTE]",help, user_peer_id)
+			announce(help, user_peer_id)
         	end
 	end
 	if is_admin then	
