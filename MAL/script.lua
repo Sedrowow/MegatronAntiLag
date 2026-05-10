@@ -1219,26 +1219,26 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         end
         elseif command == "?flip" then
         if args[1] then
-                                announce("Player " .. target_id .. " has been brought to you.", peer_id)
+            local vehicle_id = tonumber(args[1])
             if vehicle_id then
-                                announce("Failed to get your position.", peer_id)
+                local vehicle_pos, is_success = server.getVehiclePos(vehicle_id)
                 if is_success then
                     server.setVehiclePos(vehicle_id, vehicle_pos)
-                            announce("Failed to get target player's position.", peer_id)
+                    server.announce("[MAL]", "Vehicle " .. vehicle_id .. " has been flipped.", peer_id)
                 else
                     server.announce("[MAL]", "Failed to get vehicle position.", peer_id)
-                        announce("You do not have permission to use this command.", peer_id)
+                end
             else
                 server.announce("[MAL]", "Invalid vehicle ID.", peer_id)
             end
         else
             server.announce("[MAL]", "Usage: ?flip <vehicle_id>", peer_id)
-                        announce("You have been teleported to player " .. target_id .. ".", peer_id)
+        end
     elseif command == "?mintps" then
-                        announce("Failed to get target player's position.", peer_id)
-            local TPS_THRESHOLD = tonumber(args[1])
+        if is_admin then
+            TPS_THRESHOLD = tonumber(args[1])
             if not TPS_THRESHOLD then
-                    announce("Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
+                TPS_THRESHOLD = 35
             end
             server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. TPS_THRESHOLD .. ".", -1)
             if debug_mode then
@@ -1250,15 +1250,15 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
         elseif command == "?despawndelay" then
         if is_admin then
             local new_delay = tonumber(args[1])
-                                announce("Vehicle group " .. target_id .. " has been brought to you.", peer_id)
+            if new_delay and new_delay > 0 then
                 DISCONNECT_DESPAWN_DELAY = new_delay
-                                announce("Failed to get vehicle group.", peer_id)
+                server.announce("[MAL]", "Despawn delay set to " .. new_delay .. " seconds.", peer_id)
             else
                 server.announce("[MAL]", "Invalid delay value.", peer_id)
-                            announce("Failed to get your position.", peer_id)
+            end
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
-                        announce("You do not have permission to use this command.", peer_id)
+        end
     elseif command == "?cleartps" then
         if is_admin then
             local tps_threshold = tonumber(args[1])
@@ -1267,21 +1267,20 @@ function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, ...)
             end
             emergency_cleanup_tps = tps_threshold
             server.announce("[MAL]", "Set TPS threshold for emergency cleanup to " .. tps_threshold .. ".", -1)
-                            announce("You have been teleported to vehicle group " .. target_id .. ".", peer_id)
+            if debug_mode then
                 server.announce("[DEBUG]", "Admin " .. peer_id .. " set W cleanup TPS threshold to " .. tps_threshold .. ".", -1)
-                            announce("Failed to get vehicle position.", peer_id)
+            end
         else
             server.announce("[MAL]", "You do not have permission to use this command.", peer_id)
-                        announce("Failed to get vehicle group.", peer_id)
+        end
     elseif command == "?tpsdespawn" then
         if is_admin then
-                    announce("Invalid action. Use 'b' (bring) or 'g' (goto).", peer_id)
+            low_tps_despawn_enabled = not low_tps_despawn_enabled
 
             if not low_tps_despawn_enabled then
-                announce("Invalid target type. Use 'p' for player or 'v' for vehicle group.", peer_id)
                 server.removePopup(-1, 1)
                 tps_countdown = nil
-            announce("Usage: ?tp <p/v> <b/g> <target_id>", peer_id)
+                tps_warning_issued = false
             end
 
             local state = low_tps_despawn_enabled and "enabled" or "disabled"
