@@ -1,4 +1,4 @@
-local commands = {	
+commands = {	
 	"===Vote Commands (pg 4/4)===",
 	"?vote yes/no  for a apporval or disapporoval of the vote",
 	"?vote kick user_id - vote kick someone out",
@@ -415,10 +415,10 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 			end
 		end
 		
-		if (arg1 == "help") then
-	        	local commands_str = table.concat(commands, "\n")
-	        	help = "Available commands:\n" .. commands_str
-
+		if arg1 == "help" then
+	        	local commands = table.concat(commands, "\n")
+				local help = "Available vote commands:\n"
+				help = help .. commands
 			announce(help, user_peer_id)
         end
 	end

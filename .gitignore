@@ -10,6 +10,7 @@ automatedlogisticsfix/
 automatedlogisticsfix/
 default_resource_trading/
 crushdepth/
+humvee/
 olscript.lua
 # Common ignores
 *.bak
