@@ -416,13 +416,11 @@ function onCustomCommand(full_message, user_peer_id, is_admin, is_auth, command,
 		end
 		
 		if (arg1 == "help") then
-	        	local commands = createList(
-        		commands, 
-        		function(commands) return true end, 
-        		function(commands) return help end
-        		)
+	        	local commands_str = table.concat(commands, "\n")
+	        	help = "Available commands:\n" .. commands_str
+
 			announce(help, user_peer_id)
-        	end
+        end
 	end
 	if is_admin then	
 		if command == "?min-kick-req" then
